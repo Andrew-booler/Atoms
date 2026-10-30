@@ -1,0 +1,33 @@
+{
+  "files": {
+    "SKILL.md": "46e9b16d039a9778473930f3989fc92ea21cf7a189d7fc39b42f4a57f333444e",
+    "examples/branch-stop.json": "9a8ad5e5a07c44780df0d8b441f46cbcd3f8a8ceb87f1aae1a54618f2c2a60eb",
+    "examples/execution-paths.md": "9aeac7d0283796325928d977e90d1c25ea1cdb9229408d46b735b2a5cde9e5ad",
+    "examples/offline-sequence.py": "58b37f1b7ab544cb07cd58ed5a02ac3b83e1c1f2e20e786bbe5686d99ec0695c",
+    "examples/query-unmute-offline.md": "4fc4d2211dc0fe8bdb76ad9bcaa4bdc4aacfdd92bc38b425e8d127b94044a399",
+    "references/continuity.md": "d3714202ce1447d11ac5a1e172fb7ef7a8172d06b851d25689d01bac7812fccb",
+    "references/creation.md": "45db0cb4c0ec810e5d3ccafad31e735ceaf8b2f6bae8e46d520da3aab15465f0",
+    "references/delivery.md": "3d8ef9c7fa6ea118c2640833177324e40da0faf3cef37267e0fccbcebbaf21de",
+    "references/diagnosis.md": "980b9ee0b4538c6b7f86c2d157a4343352a0c1f6c3d450411c2a00ee59ff4efc",
+    "references/execution.md": "db6ef4a50d9ab9c42b2aa66dd097d420aa940f8b12dace8abe0b8c61379d3b00",
+    "references/files-and-evidence.md": "c2e01a096d9f6d81f1c2e9db0be75f59f1914f7db8bfb0354b3658818df5a184",
+    "references/film.md": "9327b07ba496b6dcac788f48fe38c6da1a0336b4f39bc8ff10671c2d4fbc7369",
+    "references/project.md": "bb58fad5bc31a1cbc26fc063e145f12bb0d91295da94863c2eb4732ccf5d2072",
+    "references/provider-results.md": "c554b358cba5ce1cf95cdf8138f49a5b91e17d7009c902da1cc3f6504f0723e2",
+    "references/queries.md": "dd94ea331037cf55aa836691a2aafcc9ddfc5f17a068addea1e0d89a4a72260c",
+    "references/scriptwriting.md": "bec28031766fd6f49d5df7d66f9e7c711044d682e1c23ec35644713131cdb87a",
+    "references/standalone.md": "39e1997ad3b52acc68f01a870ee9dfdda72523ee07e4ae7172565ea8ba72ca9b",
+    "references/storyboard-direction.md": "1f8e32ac3a66a23b1b9d74e0c08107b826c6b76dfeff8877baaca600c3f71c10",
+    "references/visual-assets.md": "607adeb4988c006c9519acc110c2e53ea7f6fcb35f36404a4247b3795eac0286",
+    "scripts/assembly_support.py": "168b7d5dd1e4a2781db4fadb3ecca0b66ae085c4547917e66ed38f6cc198372a",
+    "scripts/compose.py": "fc26d2fd8e7e6c8edc03d80d1d128998f9e6fed44d012265fb98b20a8bd94d98",
+    "scripts/contact_sheet.py": "0eade21156d109ada61122c1629e7457633567a3afe4bafad4f4f74ed11e248f",
+    "scripts/deliver.py": "c4fcb99a8387ebd0e03bf286fb689d533ecfde63e8ee391ffbc1cbe8c4af6970",
+    "scripts/project.py": "04289eae452a7f476d67a757affe1a66f3af53a10d214a64593b75ec72d8f48d",
+    "scripts/register_external.py": "e304f62b24fb1219309eb9e60688e294b5566c1f7e3104357d76eec180138aa1",
+    "scripts/render.py": "3467d471818a2f7454932f82be0bbfbb64cbd0029569e828809b3b1ea250dda9"
+  },
+  "name": "video-project",
+  "owner": "builtin",
+  "schema_version": 1
+}

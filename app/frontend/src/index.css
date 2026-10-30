@@ -1,0 +1,137 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 60 4% 10%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 60 4% 10%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 60 4% 10%;
+
+    --primary: 17 88% 40%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 60 6% 98%;
+    --secondary-foreground: 60 4% 10%;
+
+    --muted: 60 6% 98%;
+    --muted-foreground: 44 6% 42%;
+
+    --accent: 21 81% 96%;
+    --accent-foreground: 17 88% 32%;
+
+    --destructive: 0 74% 42%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 43 13% 89%;
+    --input: 42 11% 82%;
+    --ring: 17 88% 40%;
+
+    --radius: 0.5rem;
+
+    --sidebar-background: 60 6% 98%;
+    --sidebar-foreground: 60 4% 10%;
+    --sidebar-primary: 17 88% 40%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 21 81% 96%;
+    --sidebar-accent-foreground: 17 88% 32%;
+    --sidebar-border: 43 13% 89%;
+    --sidebar-ring: 17 88% 40%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-family: 'Inter Tight', 'Inter', system-ui, -apple-system, 'Segoe UI', 'PingFang SC',
+      'Microsoft YaHei', sans-serif;
+    font-feature-settings: 'ss01' on, 'cv05' on;
+  }
+
+  ::selection {
+    background: #fbe3d6;
+    color: #1a1a18;
+  }
+
+  :focus-visible {
+    outline: 2px solid rgba(194, 65, 12, 0.45);
+    outline-offset: 2px;
+  }
+}
+
+@layer utilities {
+  .studio-scroll {
+    scrollbar-width: thin;
+    scrollbar-color: #d6d3cc transparent;
+  }
+
+  .studio-scroll::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  .studio-scroll::-webkit-scrollbar-thumb {
+    background: #ddd9d2;
+    border-radius: 999px;
+    border: 2px solid transparent;
+    background-clip: padding-box;
+  }
+
+  .studio-scroll::-webkit-scrollbar-thumb:hover {
+    background: #c9c4bb;
+    background-clip: padding-box;
+  }
+
+  .mono {
+    font-family: 'JetBrains Mono', ui-monospace, 'SF Mono', monospace;
+    font-variant-ligatures: none;
+  }
+
+  .stage-dot-active {
+    animation: stage-breath 1.8s cubic-bezier(0.2, 0, 0.2, 1) infinite;
+  }
+
+  .rise-in {
+    animation: rise-in 180ms cubic-bezier(0.2, 0, 0.2, 1) both;
+  }
+}
+
+@keyframes stage-breath {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.45;
+    transform: scale(0.82);
+  }
+}
+
+@keyframes rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "files": {
+    "SKILL.md": "fee2d989cb3b6ca76a8ad63bb04bf2a14e924bcd35aac136d40755ff7f9ff3ab",
+    "scripts/generate.py": "9ccf18f607e55973c8d3e9aaad5fc7833a05e17f8d97fc128977c5eb09b13d54"
+  },
+  "name": "music-generation",
+  "owner": "builtin",
+  "schema_version": 1
+}

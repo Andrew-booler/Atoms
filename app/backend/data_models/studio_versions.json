@@ -1,0 +1,43 @@
+{
+    "title": "studio_versions",
+    "type": "object",
+    "properties": {
+        "id": {
+            "type": "integer",
+            "description": "Auto increment primary key"
+        },
+        "user_id": {
+            "type": "string",
+            "description": "Owner user id, managed by system"
+        },
+        "project_id": {
+            "type": "integer",
+            "description": "Related project id"
+        },
+        "version_no": {
+            "type": "integer",
+            "description": "Incremental version number inside the project"
+        },
+        "label": {
+            "type": "string",
+            "description": "Short human readable summary of the change"
+        },
+        "plan_summary": {
+            "type": "string",
+            "format": "text",
+            "description": "Approved plan that produced this version"
+        },
+        "artifact_html": {
+            "type": "string",
+            "format": "text",
+            "description": "Complete self-contained HTML document of the generated app"
+        }
+    },
+    "required": [
+        "id",
+        "user_id",
+        "project_id",
+        "version_no",
+        "artifact_html"
+    ]
+}

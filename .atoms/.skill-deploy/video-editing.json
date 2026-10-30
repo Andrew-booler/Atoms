@@ -1,0 +1,12 @@
+{
+  "files": {
+    "SKILL.md": "45e346e8572b555f66e70b317ca90c481f6593f89c312a36145e75dcc5caa735",
+    "references/assembly.md": "0b0e2d79a7fd11217fb9b7eee6545791afb1ff843f5e500392d2fe138dc6ffd3",
+    "scripts/assemble.py": "bb9eeadade13bfd53790963a0b350d8f9eba7b4017b798ef5e70f18c40e68274",
+    "scripts/edit.py": "6d310dd8fca523afc7875d83f3484cb549c5073da523501db26ce50e0e2adac4",
+    "scripts/video_assembly.py": "d54f15a68091457ed9105b7ed8d92486d529f26750644c7358f7e95b008523b0"
+  },
+  "name": "video-editing",
+  "owner": "builtin",
+  "schema_version": 1
+}

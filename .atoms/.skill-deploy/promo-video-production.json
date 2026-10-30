@@ -1,0 +1,9 @@
+{
+  "files": {
+    "SKILL.md": "0e4a869fa9f234796ddffe10d70ea7ff16f7fa6f857879aa4f5b548c7fcf54b0",
+    "scripts/render.py": "28765b78b20ec63bd87c6c079ec9252a57319904e04e5879b49f49656f57a9f7"
+  },
+  "name": "promo-video-production",
+  "owner": "builtin",
+  "schema_version": 1
+}

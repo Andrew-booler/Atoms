@@ -1,0 +1,11 @@
+{
+  "files": {
+    "SKILL.md": "9c646322a3095761312edbe72b2d51694ba6ac8900d5840cff9d3569f7058b9a",
+    "references/ai-search-landscape.md": "f5b7da71512a49151b341a9e120c79b5e4a5898545abafc7208cf89622f3eb74",
+    "references/content-patterns.md": "913835f61b2b0b3837cead65c77dbacbe01b34a3a04a0209e8c638ae181a8480",
+    "references/monitoring-guide.md": "29ee7fe80a229fa581fff086edc5ada4047f20afb8ef223fde07184ad8ef850c"
+  },
+  "name": "ai-seo",
+  "owner": "builtin",
+  "schema_version": 1
+}

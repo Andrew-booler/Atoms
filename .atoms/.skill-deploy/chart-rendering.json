@@ -1,0 +1,9 @@
+{
+  "files": {
+    "SKILL.md": "fc733a418d4861dac000ae77446d44e0be59bb0f293dc6b98418cd31f3022f7d",
+    "scripts/render.py": "e91c271b682811fe14487ab698f3174b21655289741d8714d37ec8e10ada9d7b"
+  },
+  "name": "chart-rendering",
+  "owner": "builtin",
+  "schema_version": 1
+}

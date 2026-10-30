@@ -1,0 +1,30 @@
+{
+  "files": {
+    "SKILL.md": "854fb982c6293fb28f6064aa2686edafa8cbf99d8adda5224b75882d52123753",
+    "UPSTREAM.md": "2565153157dbe741af5e381d81aab904d1c2601539bf23eb5c7e67d146566056",
+    "references/design-system.md": "1b8027c45040c2dead4927fa476bb02efb94cc0859c46aadf3133af96e5a153f",
+    "references/export-pptx.md": "013332802528a669fe88f770d80ff16189d5704927d38625108e8f518feca596",
+    "references/layout-rules.md": "ec0439eeb075105b6efc8e7d50d9496345af1b6c1e649abd1718057183a78ea5",
+    "references/narrative-and-page-types.md": "16b0d8c8a137acd501444106e54f57e74f6360b751f3ed62b0b22aea9d92ac8e",
+    "references/qa-loop.md": "b9210f0416371428ea79cc3d661a1afaa0823626531a47507524f3d41896003e",
+    "references/rendering-and-assets.md": "f17c80b9ca90ad1e1a2fadd223744b9b1a69dd15bfda7d6df708a65c2d1cd096",
+    "references/styles.md": "5a3cceb772003ad18d30b20d63fb7db9f20870b120a479b65d86b5925e4e8d5f",
+    "references/styles/autumn-capsule.md": "6be40921e0d41be94c5ba0800688d48bdbcb91b51821f7e2e73803c8316cc72b",
+    "references/styles/black-gallery-editorial.md": "19fe7157c45331aff243f0ef88634e50fbd39465ca6f036c0a2d0fb6851c75a7",
+    "references/styles/creative-portfolio-slides.md": "dc1d81c4bb8e01811baf91432d9353ddd080314a8d901c9c3bbbca7579e1879b",
+    "references/styles/digital-contrast-theme.md": "026cbd47380c86a4170a9baed3150a48cc8feb42ff4bdb46ed31dbcdf76f35fe",
+    "references/styles/french-editorial-commerce.md": "98fc03be477f5a3d554cd159bd265cc71e1d97a3fcae5021e5e6d1d05b631364",
+    "references/styles/impact-grid-editorial.md": "68403244a71c413b5ec1d463f7c1e423dd5e721ecfcef1694f5ea6b5f7c2b6fc",
+    "references/styles/neon-lime-creative-brief.md": "b9cc854003dbcd22839471ad96c81bdfae39a0c37b1cbd90c7695a2592c8d572",
+    "references/styles/terminal-tech-magazine.md": "ff6182c54351f942bb18aaa8c3ef70a9f2c79b278f1498a6ed0b26540e1f0060",
+    "references/styles/vintage-red-cream-photography-portfolio.md": "90c8ff6db346f371d0c0d530ba503c758a22b6631012f293880a96a55183b511",
+    "references/styles/warm-paper-editorial-brief.md": "6df74b7f93a26bf52a4e2ac95024c2535d1286ef35f309fbd165abebf980911a",
+    "references/workflow.md": "f9530b73b273b03ec246850bb9c32020faf0162f07185915a522a3547c38acc3",
+    "scripts/export_pptx.py": "7e036241854ed2b3faae5c6150a325057061156f34db7fa97a301d693ed09b05",
+    "scripts/review_report.py": "d6f519b22ab99346ee5a7d95ec09a65585896aa502f5fb8b4ed4279677a82968",
+    "scripts/review_slides.py": "61a7ffea913a76970abd01a69709dfd2e5c66a03757f58037232a0f6cd82d87e"
+  },
+  "name": "ppt-design-core",
+  "owner": "builtin",
+  "schema_version": 1
+}

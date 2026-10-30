@@ -1,0 +1,9 @@
+{
+  "files": {
+    "SKILL.md": "92bc450eb1ae5f14a27cb70086a85843a0927e2d0143383c70e518ae02588b7f",
+    "scripts/generate.py": "91bc231b88ca933cf1e58ac5f19b7d45c5aaaaf7a0c7edd880846036f8c5f8a6"
+  },
+  "name": "image-generation",
+  "owner": "builtin",
+  "schema_version": 1
+}

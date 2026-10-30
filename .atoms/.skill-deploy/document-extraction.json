@@ -1,0 +1,9 @@
+{
+  "files": {
+    "SKILL.md": "4b36706aaa7cfea9869cf8d199fdd617e27df365dd96dc12bf40f01c9d4a2ba7",
+    "scripts/extract.py": "368ff4724a6463d5527051a480c224fc3f644d70e66083b79ab969e8e405990d"
+  },
+  "name": "document-extraction",
+  "owner": "builtin",
+  "schema_version": 1
+}

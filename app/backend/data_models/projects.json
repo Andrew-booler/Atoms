@@ -1,0 +1,40 @@
+{
+    "title": "projects",
+    "type": "object",
+    "properties": {
+        "id": {
+            "type": "integer",
+            "description": "Auto increment primary key"
+        },
+        "user_id": {
+            "type": "string",
+            "description": "Owner user id, managed by system"
+        },
+        "name": {
+            "type": "string",
+            "description": "Project name"
+        },
+        "description": {
+            "type": "string",
+            "format": "text",
+            "description": "Original requirement description"
+        },
+        "status": {
+            "type": "string",
+            "description": "active | archived"
+        },
+        "current_version": {
+            "type": "integer",
+            "description": "Latest applied version number"
+        },
+        "preview_ready": {
+            "type": "boolean",
+            "description": "Whether a runnable artifact exists"
+        }
+    },
+    "required": [
+        "id",
+        "user_id",
+        "name"
+    ]
+}

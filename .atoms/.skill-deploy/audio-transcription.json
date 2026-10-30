@@ -1,0 +1,9 @@
+{
+  "files": {
+    "SKILL.md": "73abc35f350403592f0a6754a647848940a28fa5da927c03b41453dfaa3e3405",
+    "scripts/transcribe.py": "69b228241945844dd31adbfa672177069475d3bdab270a16a24bc2db97f62c30"
+  },
+  "name": "audio-transcription",
+  "owner": "builtin",
+  "schema_version": 1
+}

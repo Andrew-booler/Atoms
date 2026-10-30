@@ -1,0 +1,43 @@
+{
+    "title": "studio_messages",
+    "type": "object",
+    "properties": {
+        "id": {
+            "type": "integer",
+            "description": "Auto increment primary key"
+        },
+        "user_id": {
+            "type": "string",
+            "description": "Owner user id, managed by system"
+        },
+        "project_id": {
+            "type": "integer",
+            "description": "Related project id"
+        },
+        "role": {
+            "type": "string",
+            "description": "user | assistant | system"
+        },
+        "kind": {
+            "type": "string",
+            "description": "requirement | plan | build | note | error"
+        },
+        "content": {
+            "type": "string",
+            "format": "text",
+            "description": "Message body"
+        },
+        "meta": {
+            "type": "string",
+            "format": "text",
+            "description": "JSON encoded extra payload"
+        }
+    },
+    "required": [
+        "id",
+        "user_id",
+        "project_id",
+        "role",
+        "content"
+    ]
+}
