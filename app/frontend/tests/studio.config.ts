@@ -11,9 +11,9 @@ const databaseUrl =
 
 export default defineConfig({
   tsconfig: '../tsconfig.app.json',
-  testDir: '.', testMatch: 'studio.*.spec.ts', workers: 1, fullyParallel: false,
+  testDir: '.', testMatch: 'studio.integration.spec.ts', workers: 1, fullyParallel: false,
   timeout: 240000, expect: { timeout: 10000 },
-  reporter: [['list'], ['json', { outputFile: 'tests/results.json' }]],
+  reporter: [['list'], ['json', { outputFile: path.join(testsDir, 'results.json') }]],
   use: { baseURL: 'http://127.0.0.1:3101', headless: true, trace: 'retain-on-failure' },
   webServer: [
     {

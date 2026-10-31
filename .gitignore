@@ -5,4 +5,7 @@ __pycache__/
 *.log
 test-results/
 playwright-report/
+coverage/
+**/tests/results.json
+**/tests/tests/
 .pytest_cache/
