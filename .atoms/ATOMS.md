@@ -1,5 +1,5 @@
 ---
-last_updated: 2026-10-29T10:05:00Z
+last_updated: 2026-10-31
 status: active
 ---
 
@@ -7,24 +7,32 @@ status: active
 
 ## Project Overview
 
-Atoms Studio —— 一个对标 Atoms 的 AI 应用生成工作台。用户用一句话描述需求，AI 先输出可确认的结构化计划，确认后真实生成可运行的前端应用，并在 App Viewer 沙箱内即时交互；每次构建保存为可回滚版本。首版聚焦「需求 → 计划 → 可操作成品」这条完整主流程。
+Atoms Studio是共享对话式工作台：输入→保存需求→mock计划→确认→mock结构/HTML→真实保存/预览→第二轮→恢复历史。所有使用者共享数据，不提供产品登录、用户管理、权限或租户隔离。操作及子请求串行，成功/失败均释放busy；不做跨标签锁、队列或并发协调。AI默认预置输出，不真实调用，不收密钥，不评估质量。
 
 ## Key Decisions
+
 | Date | Decision | By | Rationale |
-|------|----------|-----|-----------|
-| 2026-10-29 | 后端使用 Atoms Cloud（Auth/Database/Edge Functions/AI），AI 全部走服务端 | Alex | 向终端用户暴露 AI 能力，密钥不能放前端 |
-| 2026-10-29 | AI 调用拆成 plan / outline / artifact 三次独立模型调用 | Alex | 每个阶段可单独重试，前端能展示真实阶段进度而非假进度条 |
-| 2026-10-29 | 产物为自包含单文件 HTML，用 iframe srcDoc + sandbox 渲染 | Alex | 无需构建服务器即可真正可交互，且天然隔离宿主环境 |
-| 2026-10-29 | 模型通过 profile 抽象（balanced/fast/quality），前端只传 key | Alex | 可替换适配，避免模型名与密钥泄漏到前端 |
-| 2026-10-29 | 版本回滚只移动 project.current_version 指针 | Alex | 产物快照不可变，回滚是 O(1) 且不产生冗余数据 |
-| 2026-10-29 | 视觉采用纯白「纸感」+ 1px 分隔线 + 暖赤陶主色 #C2410C | Alex | 让对话与预览成为视觉焦点，区别于蓝紫渐变 AI 风 |
-| 2026-10-29 | 部署分享 / Cloud 后端 / 版本历史用占位页保留真实信息架构 | Alex | 首版聚焦主流程，同时让用户看清产品方向 |
+|---|---|---|---|
+| 2026-10-31 | 用户授权剩余三项实施并取消强制Mike审阅 | 用户，Alex记录 | 不等待意见、不增加审阅门禁；保留可读性、自检和验证 |
+| 2026-10-31 | Studio业务路由共享读取，新记录user_id=studio-shared | Alex | 固定非凭据标识，不暴露服务端凭据，不改生产表结构 |
+| 2026-10-31 | 默认MockOutputProvider，真实提供者只显式适配边界 | Alex | Plan/Outline/HTML形状兼容，无真实模型请求 |
+| 2026-10-31 | StudioOperation集中busy/错误/重试，Index组合实际业务步骤 | Alex | 只抽取实际职责，不为形式建控制器/仓储全集 |
+| 2026-10-31 | 批准状态与版本同事务，恢复摘要立即同步 | Alex | 防重复保存与误成功；恢复读取失败只读重试 |
+| 2026-10-31 | 保留60项目/最早400消息，手机最小抽屉 | Alex | 不扩展分页，超容量核对及草稿刷新不保证 |
+| 2026-10-31 | Playwright仅单元21/集成35，隔离studio_test_t1 | Alex | 单元静态页面/类替身，集成真实路由与PostgreSQL，仅AI受控；全部设计子情景不由56标题推导 |
 
 ## Constraints
 
-- 前端统一走 `@metagptx/web-sdk`，禁止 fetch/axios 直连 `/api/v1/*`
-- 后端路由前缀必须 `/api/v1/`，routers 自动发现
-- 禁止修改 `app/backend/core/**`、`models/**`、`main.py`、`lambda_handler.py`
-- 慢速 AI 调用前后必须收尾 DB 事务（短 DB 阶段 → commit → AI → 新 DB 阶段）
-- 所有业务数据按 `user_id` 隔离，`user_id` 由系统托管，前端不可写
-- 用户无法执行终端命令，平台预览自动重载
+- 现有React/Vite与Atoms Cloud FastAPI，不重新初始化或激活后端。
+- 前端产品API经SDK；11个Studio路径保持不变，不新增幂等字段或计划id。
+- 不修改backend core/models/main/lambda等受保护模块、生产表结构和系统预览配置。
+- 测试宿主只建立/重置studio_test_命名空间三表，不清空public生产数据。
+- 部署与Cloud只占位，不实际发布或管理数据。
+- 已取消外部架构模板及通用规范待办；第三方原文不修改，不恢复arc42。
+- 正式需求、架构、规范、模块测试与执行证据唯一维护于docs。
+
+## 术语表
+
+- mock：预置结果或受控失败替代外部调用。
+- version_no/current_version：项目内序号；不是版本记录id。
+- 串行：前项及子请求结束后再开始下一项。

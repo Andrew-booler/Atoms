@@ -11,6 +11,7 @@ interface PlanCardProps {
   onApprove?: () => void;
   onRevise?: () => void;
   approveDisabled?: boolean;
+  onCopy: (action: () => Promise<void>) => Promise<void>;
 }
 
 const stateLabel: Record<PlanCardProps['state'], string> = {
@@ -26,10 +27,11 @@ export function PlanCard({
   onApprove,
   onRevise,
   approveDisabled,
+  onCopy,
 }: PlanCardProps) {
   const [copied, setCopied] = useState(false);
 
-  const copyPlan = async () => {
+  const copyPlan = () => onCopy(async () => {
     const text = [
       plan.summary,
       '',
@@ -43,8 +45,9 @@ export function PlanCard({
       window.setTimeout(() => setCopied(false), 1600);
     } catch {
       setCopied(false);
+      throw new Error("复制计划失败，请检查浏览器剪贴板权限后重试。");
     }
-  };
+  });
 
   return (
     <div className="rise-in overflow-hidden rounded-[10px] border border-line bg-paper">
@@ -141,6 +144,7 @@ export function PlanCard({
           <button
             type="button"
             onClick={copyPlan}
+            disabled={approveDisabled}
             className="ml-auto inline-flex h-8 items-center gap-1.5 rounded-md px-2 text-[12px] text-ink-faint transition-colors hover:text-ink"
           >
             {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}

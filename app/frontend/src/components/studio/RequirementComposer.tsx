@@ -50,6 +50,7 @@ export function RequirementComposer({
               <button
                 key={item}
                 type="button"
+                disabled={busy || disabled}
                 onClick={() => {
                   onChange(item);
                   areaRef.current?.focus();
@@ -87,7 +88,7 @@ export function RequirementComposer({
 
           <div className="flex items-center gap-2 px-2 pb-2 pt-1">
             <label className="sr-only" htmlFor="model-profile">
-              生成模型
+              输出配置
             </label>
             <select
               id="model-profile"

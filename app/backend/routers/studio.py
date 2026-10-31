@@ -1,12 +1,4 @@
-"""Studio 业务接口：项目、对话消息、版本产物、AI 生成阶段。
-
-所有读写都按当前登录用户隔离；AI 调用统一走 services/studio_ai.py 的适配层。
-生成被拆成「计划 → 界面结构 → 可运行产物」三个独立接口，每个接口只做一次模型调用，
-前端据此呈现真实的分阶段进度，而不是假进度条。
-
-会话边界：慢速 AI 调用前先 commit 收尾 DB 阶段，写入在调用完成后的新 DB 阶段完成。
-"""
-
+"""Atoms Cloud共享业务接口：真实持久化，默认预置输出，无产品登录门禁。"""
 import json
 import logging
 from datetime import datetime
@@ -18,12 +10,12 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.database import get_db
-from dependencies.auth import get_current_user
 from models.projects import Projects
 from models.studio_messages import Studio_messages
 from models.studio_versions import Studio_versions
-from schemas.auth import UserResponse
-from services import studio_ai
+from services import studio_output as studio_ai
+
+SHARED_CONTEXT = "studio-shared"
 
 logger = logging.getLogger(__name__)
 
@@ -151,6 +143,21 @@ class RestoreRequest(BaseModel):
 
 
 # ---------- Helpers ----------
+def _plan_request_text(plan: dict) -> str:
+    return "\n".join([plan.get("summary", ""), "", *[
+        f"{i}. {step.get('title', '')} — {step.get('detail', '')}"
+        for i, step in enumerate(plan.get("steps", []), 1)
+    ]])
+
+
+async def _commit(db: AsyncSession):
+    try:
+        await db.commit()
+    except Exception as exc:
+        await db.rollback()
+        logger.exception("Studio持久化失败")
+        raise HTTPException(status_code=500, detail="保存失败，未提交本次变更，请重试") from exc
+
 def _parse_meta(raw: Optional[str]) -> Dict[str, Any]:
     if not raw:
         return {}
@@ -185,11 +192,11 @@ def _plan_to_text(plan: PlanPayload) -> str:
 
 async def _load_project(db: AsyncSession, project_id: int, user_id: str) -> Projects:
     result = await db.execute(
-        select(Projects).where(Projects.id == project_id, Projects.user_id == user_id)
+        select(Projects).where(Projects.id == project_id)
     )
     project = result.scalar_one_or_none()
     if project is None:
-        raise HTTPException(status_code=404, detail="项目不存在或无权访问")
+        raise HTTPException(status_code=404, detail="项目不存在")
     return project
 
 
@@ -244,13 +251,11 @@ async def list_models() -> ModelsResponse:
 
 @router.get("/projects", response_model=List[ProjectSummary])
 async def list_projects(
-    current_user: UserResponse = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> List[ProjectSummary]:
     result = await db.execute(
         select(Projects)
-        .where(Projects.user_id == current_user.id)
-        .order_by(Projects.updated_at.desc(), Projects.id.desc())
+                .order_by(Projects.updated_at.desc(), Projects.id.desc())
         .limit(60)
     )
     return [await _summary(db, project) for project in result.scalars().all()]
@@ -259,11 +264,10 @@ async def list_projects(
 @router.post("/projects", response_model=ProjectSummary, status_code=201)
 async def create_project(
     data: ProjectCreate,
-    current_user: UserResponse = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> ProjectSummary:
     project = Projects(
-        user_id=current_user.id,
+        user_id=SHARED_CONTEXT,
         name=data.name.strip(),
         description=data.description.strip(),
         status="active",
@@ -271,17 +275,16 @@ async def create_project(
         preview_ready=False,
     )
     db.add(project)
-    await db.commit()
+    await _commit(db)
     return await _summary(db, project)
 
 
 @router.get("/projects/{project_id}", response_model=ProjectDetail)
 async def get_project(
     project_id: int,
-    current_user: UserResponse = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> ProjectDetail:
-    project = await _load_project(db, project_id, current_user.id)
+    project = await _load_project(db, project_id, SHARED_CONTEXT)
 
     messages = (
         await db.execute(
@@ -326,14 +329,13 @@ async def get_project(
 @router.delete("/projects/{project_id}")
 async def delete_project(
     project_id: int,
-    current_user: UserResponse = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> Dict[str, Any]:
-    project = await _load_project(db, project_id, current_user.id)
+    project = await _load_project(db, project_id, SHARED_CONTEXT)
     await db.execute(delete(Studio_messages).where(Studio_messages.project_id == project.id))
     await db.execute(delete(Studio_versions).where(Studio_versions.project_id == project.id))
     await db.delete(project)
-    await db.commit()
+    await _commit(db)
     return {"deleted": True, "id": project_id}
 
 
@@ -341,21 +343,19 @@ async def delete_project(
 async def append_message(
     project_id: int,
     data: MessageCreate,
-    current_user: UserResponse = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> MessageOut:
-    project = await _load_project(db, project_id, current_user.id)
+    project = await _load_project(db, project_id, SHARED_CONTEXT)
     row = await _append_message(
         db,
         project_id=project_id,
-        user_id=current_user.id,
+        user_id=SHARED_CONTEXT,
         role=data.role,
         kind=data.kind,
         content=data.content,
         meta=data.meta,
     )
-    project.updated_at = datetime.now()
-    await db.commit()
+    await _commit(db)
     return _message_out(row)
 
 
@@ -363,16 +363,15 @@ async def append_message(
 async def plan(
     project_id: int,
     data: PlanRequest,
-    current_user: UserResponse = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> PlanResponse:
     """阶段一：把需求拆成结构化计划，等用户确认后再执行。"""
-    project = await _load_project(db, project_id, current_user.id)
+    project = await _load_project(db, project_id, SHARED_CONTEXT)
     project_name = project.name
-    await db.commit()
+    await _commit(db)
 
     try:
-        raw_plan = await studio_ai.generate_plan(
+        raw_plan = await studio_ai.get_provider().plan(
             data.requirement, project_name=project_name, profile=data.profile
         )
     except HTTPException:
@@ -381,29 +380,42 @@ async def plan(
         logger.error("Studio plan failed: %s", exc, exc_info=True)
         raise HTTPException(status_code=502, detail=f"计划生成失败，请重试：{exc}") from exc
 
-    payload = PlanPayload(**raw_plan)
+    try:
+        payload = PlanPayload(**raw_plan)
+        if not payload.steps or any(not step.get("title") for step in payload.steps):
+            raise ValueError("计划缺少步骤")
+    except (ValueError, TypeError) as exc:
+        raise HTTPException(status_code=502, detail="模拟计划结构无效") from exc
     text = _plan_to_text(payload)
     model = studio_ai.resolve_model(data.profile)
 
-    project = await _load_project(db, project_id, current_user.id)
+    project = await _load_project(db, project_id, SHARED_CONTEXT)
+    existing = (await db.execute(select(Studio_messages).where(
+        Studio_messages.project_id == project_id, Studio_messages.kind == "plan"
+    ).order_by(Studio_messages.id.desc()))).scalars().first()
+    latest_user = (await db.execute(select(Studio_messages).where(
+        Studio_messages.project_id == project_id, Studio_messages.role == "user"
+    ).order_by(Studio_messages.id.desc()))).scalars().first()
+    if existing and _parse_meta(existing.meta).get("requirement_message_id") == (latest_user.id if latest_user else None) and _parse_meta(existing.meta).get("requirement") == data.requirement:
+        return PlanResponse(plan=PlanPayload(**_parse_meta(existing.meta)["plan"]), message=_message_out(existing), model=model)
     message = await _append_message(
         db,
         project_id=project_id,
-        user_id=current_user.id,
+        user_id=SHARED_CONTEXT,
         role="assistant",
         kind="plan",
         content=text,
         meta={
             "plan": payload.model_dump(),
             "model": model,
-            "requirement": data.requirement[:2000],
+            "requirement": data.requirement,
             "approved": False,
+            "requirement_message_id": latest_user.id if latest_user else None,
         },
     )
     if not (project.description or "").strip():
-        project.description = data.requirement[:2000]
-    project.updated_at = datetime.now()
-    await db.commit()
+        project.description = data.requirement
+    await _commit(db)
 
     return PlanResponse(plan=payload, message=_message_out(message), model=model)
 
@@ -412,15 +424,14 @@ async def plan(
 async def outline(
     project_id: int,
     data: OutlineRequest,
-    current_user: UserResponse = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> OutlineResponse:
     """阶段二：确认计划后，先产出界面结构与示例数据。"""
-    await _load_project(db, project_id, current_user.id)
-    await db.commit()
+    await _load_project(db, project_id, SHARED_CONTEXT)
+    await _commit(db)
 
     try:
-        raw = await studio_ai.generate_outline(
+        raw = await studio_ai.get_provider().outline(
             data.requirement,
             {"summary": data.plan_summary, "steps": []},
             profile=data.profile,
@@ -431,24 +442,27 @@ async def outline(
         logger.error("Studio outline failed: %s", exc, exc_info=True)
         raise HTTPException(status_code=502, detail=f"界面结构生成失败，请重试：{exc}") from exc
 
-    return OutlineResponse(
-        outline=OutlinePayload(**raw), model=studio_ai.resolve_model(data.profile)
-    )
+    try:
+        payload = OutlinePayload(**raw)
+        if not payload.sections or any(not section.get("name") for section in payload.sections):
+            raise ValueError("结构缺少区域")
+    except (ValueError, TypeError) as exc:
+        raise HTTPException(status_code=502, detail="模拟页面结构无效") from exc
+    return OutlineResponse(outline=payload, model=studio_ai.resolve_model(data.profile))
 
 
 @router.post("/projects/{project_id}/artifact", response_model=BuildResponse)
 async def artifact(
     project_id: int,
     data: ArtifactRequest,
-    current_user: UserResponse = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> BuildResponse:
     """阶段三：产出真正可运行的单文件应用，并保存为新版本。"""
-    await _load_project(db, project_id, current_user.id)
-    await db.commit()
+    await _load_project(db, project_id, SHARED_CONTEXT)
+    await _commit(db)
 
     try:
-        artifact_html = await studio_ai.generate_artifact(
+        artifact_html = await studio_ai.get_provider().artifact(
             data.requirement,
             {"summary": data.plan_summary, "steps": []},
             data.outline.model_dump(),
@@ -460,7 +474,20 @@ async def artifact(
         logger.error("Studio artifact failed: %s", exc, exc_info=True)
         raise HTTPException(status_code=502, detail=f"产物生成失败，请重试：{exc}") from exc
 
-    project = await _load_project(db, project_id, current_user.id)
+    if not artifact_html.strip() or "<body" not in artifact_html.lower() or "</html>" not in artifact_html.lower():
+        raise HTTPException(status_code=502, detail="模拟HTML文档不完整")
+    project = await _load_project(db, project_id, SHARED_CONTEXT)
+    plans = (await db.execute(select(Studio_messages).where(
+        Studio_messages.project_id == project_id, Studio_messages.kind == "plan"
+    ).order_by(Studio_messages.id.desc()))).scalars().all()
+    plan_message = next((row for row in plans if _parse_meta(row.meta).get("requirement") == data.requirement and
+        _plan_request_text(_parse_meta(row.meta).get("plan", {})) == data.plan_summary), None)
+    if plan_message and _parse_meta(plan_message.meta).get("approved"):
+        version_id = _parse_meta(plan_message.meta).get("version_id")
+        saved = (await db.execute(select(Studio_versions).where(Studio_versions.id == version_id))).scalar_one()
+        builds = (await db.execute(select(Studio_messages).where(Studio_messages.project_id == project_id, Studio_messages.kind == "build"))).scalars().all()
+        saved_message = next(row for row in builds if _parse_meta(row.meta).get("version_id") == version_id)
+        return BuildResponse(project=await _summary(db, project), version=VersionSummary(id=saved.id,version_no=saved.version_no,label=saved.label,created_at=saved.created_at),message=_message_out(saved_message),outline_title=data.outline.title,artifact_html=saved.artifact_html)
     latest = await db.scalar(
         select(func.max(Studio_versions.version_no)).where(
             Studio_versions.project_id == project_id
@@ -470,11 +497,11 @@ async def artifact(
     title = data.outline.title or "原型"
 
     version = Studio_versions(
-        user_id=current_user.id,
+        user_id=SHARED_CONTEXT,
         project_id=project_id,
         version_no=next_no,
         label=f"v{next_no} · {title}",
-        plan_summary=data.plan_summary[:4000],
+        plan_summary=data.plan_summary,
         artifact_html=artifact_html,
     )
     db.add(version)
@@ -483,7 +510,7 @@ async def artifact(
     message = await _append_message(
         db,
         project_id=project_id,
-        user_id=current_user.id,
+        user_id=SHARED_CONTEXT,
         role="assistant",
         kind="build",
         content=f"已生成「{title}」的可运行版本 v{next_no}。",
@@ -497,10 +524,13 @@ async def artifact(
         },
     )
 
+    if plan_message:
+        meta = _parse_meta(plan_message.meta)
+        meta.update(approved=True, version_id=version.id)
+        plan_message.meta = json.dumps(meta, ensure_ascii=False)
     project.current_version = next_no
     project.preview_ready = True
-    project.updated_at = datetime.now()
-    await db.commit()
+    await _commit(db)
 
     return BuildResponse(
         project=await _summary(db, project),
@@ -519,17 +549,14 @@ async def artifact(
 @router.get("/versions/{version_id}", response_model=VersionDetail)
 async def get_version(
     version_id: int,
-    current_user: UserResponse = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> VersionDetail:
     result = await db.execute(
-        select(Studio_versions).where(
-            Studio_versions.id == version_id, Studio_versions.user_id == current_user.id
-        )
+        select(Studio_versions).where(Studio_versions.id == version_id)
     )
     version = result.scalar_one_or_none()
     if version is None:
-        raise HTTPException(status_code=404, detail="版本不存在或无权访问")
+        raise HTTPException(status_code=404, detail="版本不存在")
     return VersionDetail(
         id=version.id,
         project_id=version.project_id,
@@ -545,32 +572,31 @@ async def get_version(
 async def restore_version(
     project_id: int,
     data: RestoreRequest,
-    current_user: UserResponse = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> ProjectSummary:
-    project = await _load_project(db, project_id, current_user.id)
+    project = await _load_project(db, project_id, SHARED_CONTEXT)
     result = await db.execute(
         select(Studio_versions).where(
             Studio_versions.id == data.version_id,
             Studio_versions.project_id == project_id,
-            Studio_versions.user_id == current_user.id,
         )
     )
     version = result.scalar_one_or_none()
     if version is None:
-        raise HTTPException(status_code=404, detail="版本不存在或无权访问")
+        raise HTTPException(status_code=404, detail="版本不存在")
 
+    if project.current_version == version.version_no:
+        return await _summary(db, project)
     project.current_version = version.version_no
     project.preview_ready = True
-    project.updated_at = datetime.now()
     await _append_message(
         db,
         project_id=project_id,
-        user_id=current_user.id,
+        user_id=SHARED_CONTEXT,
         role="system",
         kind="note",
         content=f"已回滚到 v{version.version_no}。",
         meta={"version_id": version.id, "version_no": version.version_no},
     )
-    await db.commit()
+    await _commit(db)
     return await _summary(db, project)

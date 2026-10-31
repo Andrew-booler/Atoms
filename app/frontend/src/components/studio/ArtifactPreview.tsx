@@ -12,6 +12,7 @@ interface ArtifactPreviewProps {
   activeVersion?: number | null;
   onRestore: (version: VersionSummary) => void;
   restoring: boolean;
+  onAction: (action: () => Promise<void>) => Promise<void>;
 }
 
 type Viewport = 'desktop' | 'mobile';
@@ -25,6 +26,7 @@ export function ArtifactPreview({
   activeVersion,
   onRestore,
   restoring,
+  onAction,
 }: ArtifactPreviewProps) {
   const [viewport, setViewport] = useState<Viewport>('desktop');
   const [reloadKey, setReloadKey] = useState(0);
@@ -36,13 +38,15 @@ export function ArtifactPreview({
     return html;
   }, [html]);
 
-  const openInNewTab = () => {
+  const openInNewTab = () => onAction(async () => {
     if (!document_) return;
     const blob = new Blob([document_], { type: 'text/html;charset=utf-8' });
     const url = URL.createObjectURL(blob);
-    window.open(url, '_blank', 'noopener,noreferrer');
+    const opened = window.open(url, '_blank');
+    if (opened) opened.opener = null;
     window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
-  };
+    if (!opened) throw new Error("外开页面被浏览器阻止，请允许弹窗后重试。");
+  });
 
   return (
     <section className="flex h-full min-h-0 flex-col bg-canvas" aria-label="应用预览">
@@ -81,7 +85,8 @@ export function ArtifactPreview({
           >
             <button
               type="button"
-              onClick={() => setViewport('desktop')}
+              disabled={busy}
+              onClick={() => { if (!busy) setViewport('desktop'); }}
               aria-label="桌面视图"
               aria-pressed={viewport === 'desktop'}
               className={cn(
@@ -93,7 +98,8 @@ export function ArtifactPreview({
             </button>
             <button
               type="button"
-              onClick={() => setViewport('mobile')}
+              disabled={busy}
+              onClick={() => { if (!busy) setViewport('mobile'); }}
               aria-label="移动视图"
               aria-pressed={viewport === 'mobile'}
               className={cn(
@@ -107,9 +113,9 @@ export function ArtifactPreview({
 
           <button
             type="button"
-            onClick={() => setReloadKey((key) => key + 1)}
+            onClick={() => { if (!busy) setReloadKey((key) => key + 1); }}
             aria-label="重新加载预览"
-            disabled={!html}
+            disabled={!html || busy}
             className="flex h-7 w-7 items-center justify-center rounded-md text-ink-faint transition-colors hover:bg-paper hover:text-ink disabled:opacity-40"
           >
             <RotateCw className="h-3.5 w-3.5" strokeWidth={1.9} />
@@ -118,7 +124,7 @@ export function ArtifactPreview({
             type="button"
             onClick={openInNewTab}
             aria-label="在新标签页打开"
-            disabled={!html}
+            disabled={!html || busy}
             className="flex h-7 w-7 items-center justify-center rounded-md text-ink-faint transition-colors hover:bg-paper hover:text-ink disabled:opacity-40"
           >
             <ExternalLink className="h-3.5 w-3.5" strokeWidth={1.9} />
@@ -140,7 +146,8 @@ export function ArtifactPreview({
               title={`${title} 预览`}
               srcDoc={document_}
               sandbox="allow-scripts allow-forms allow-modals allow-popups"
-              className="h-full w-full border-0 bg-white"
+              className={cn("h-full w-full border-0 bg-white", busy && "pointer-events-none")}
+              tabIndex={busy ? -1 : 0}
             />
           </div>
         ) : (
@@ -169,7 +176,7 @@ export function ArtifactPreview({
         )}
         {html && (
           <span className="mono ml-auto text-[10.5px] text-ink-faint">
-            {Math.round(document_.length / 1024)} KB
+            {Math.round(new TextEncoder().encode(document_).length / 1024)} KB
           </span>
         )}
       </footer>

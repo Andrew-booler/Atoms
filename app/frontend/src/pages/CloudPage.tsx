@@ -1,29 +1,9 @@
 import { PlaceholderPanel } from '@/components/studio/PlaceholderPanel';
 
 export default function CloudPage() {
-  return (
-    <PlaceholderPanel
-      eyebrow="Cloud 后端"
-      title="Cloud 后端能力"
-      description="为生成的应用按需开通数据库、登录、文件存储与边缘函数，让原型直接长成可上线的产品。"
-      planned={[
-        {
-          title: '数据表管理',
-          detail: '在界面里定义实体字段，自动生成数据表与增删改查接口。',
-        },
-        {
-          title: '用户与权限',
-          detail: '复用平台登录体系，为生成的应用配置角色与数据可见范围。',
-        },
-        {
-          title: '文件存储',
-          detail: '上传头像、图片与附件，返回可直接渲染的持久访问地址。',
-        },
-        {
-          title: '边缘函数',
-          detail: '为需要服务端逻辑的流程编写接口，密钥只保存在服务端。',
-        },
-      ]}
-    />
-  );
+  return <PlaceholderPanel eyebrow="Cloud 后端" title="Cloud 后端说明" description="工作台已经使用共享项目、消息和历史版本数据。本页仅为占位说明，不提供数据管理、认证或配置操作。" planned={[
+    { title: '共享业务数据', detail: '所有使用者查看同一份工作台记录，不提供账号管理。' },
+    { title: '项目与历史版本', detail: '返回工作台可提交需求、保存模拟网页并恢复历史。' },
+    { title: '占位边界', detail: '本页没有增删改查、文件上传、服务配置或发布功能。' },
+  ]} />;
 }

@@ -8,7 +8,9 @@ interface ConversationStreamProps {
   messages: StudioMessage[];
   planState: 'pending' | 'running' | 'done';
   onApprove: (message: StudioMessage) => void;
-  onRevise: () => void;
+  onRevise: (message: StudioMessage) => void;
+  runningPlanId?: number | null;
+  onCopy: (action: () => Promise<void>) => Promise<void>;
   onRetry?: () => void;
   busy: boolean;
   error?: string | null;
@@ -24,7 +26,8 @@ function formatTime(raw?: string | null) {
 
 export function ConversationStream({
   messages,
-  planState,
+  runningPlanId,
+  onCopy,
   onApprove,
   onRevise,
   onRetry,
@@ -59,9 +62,10 @@ export function ConversationStream({
                 key={message.id}
                 plan={message.meta.plan}
                 model={message.meta.model}
-                state={approved || planState === 'done' ? 'done' : planState}
+                state={approved ? 'done' : runningPlanId === message.id ? 'running' : 'pending'}
                 onApprove={() => onApprove(message)}
-                onRevise={onRevise}
+                onRevise={() => onRevise(message)}
+                onCopy={onCopy}
                 approveDisabled={busy}
               />
             );
@@ -150,6 +154,7 @@ export function ConversationStream({
               <button
                 type="button"
                 onClick={onRetry}
+                disabled={busy}
                 className="inline-flex h-7 items-center gap-1 rounded border border-[#E8BFBF] !bg-transparent px-2 text-[12px] font-medium text-err transition-colors hover:!bg-transparent"
               >
                 <RotateCcw className="h-3 w-3" strokeWidth={2} />

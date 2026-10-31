@@ -1,20 +1,17 @@
-import { Database, FolderOpen, LayoutGrid, LogOut, Plus, Rocket, Trash2 } from 'lucide-react';
+import { Database, FolderOpen, LayoutGrid, Plus, Rocket, Trash2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { ProjectSummary } from '@/lib/studio';
-import type { AuthState } from '@/hooks/useStudioAuth';
 
 interface ProjectRailProps {
   projects: ProjectSummary[];
   activeId: number | null;
   loading: boolean;
-  authState: AuthState;
+  busy: boolean;
   activeNav: 'studio' | 'deploy' | 'cloud';
   onSelect: (project: ProjectSummary) => void;
   onCreate: () => void;
   onDelete: (project: ProjectSummary) => void;
   onNavigate: (target: 'studio' | 'deploy' | 'cloud') => void;
-  onLogin: () => void;
-  onLogout: () => void;
 }
 
 const navItems = [
@@ -27,14 +24,12 @@ export function ProjectRail({
   projects,
   activeId,
   loading,
-  authState,
+  busy,
   activeNav,
   onSelect,
   onCreate,
   onDelete,
   onNavigate,
-  onLogin,
-  onLogout,
 }: ProjectRailProps) {
   return (
     <aside className="flex h-full w-full flex-col border-r border-line bg-canvas">
@@ -53,6 +48,7 @@ export function ProjectRail({
             <button
               key={item.key}
               type="button"
+              disabled={busy}
               onClick={() => onNavigate(item.key)}
               aria-current={active ? 'page' : undefined}
               className={cn(
@@ -73,6 +69,7 @@ export function ProjectRail({
         <span className="mono text-[10.5px] uppercase tracking-[0.09em] text-ink-faint">项目</span>
         <button
           type="button"
+              disabled={busy}
           onClick={onCreate}
           aria-label="新建项目"
           className="flex h-6 w-6 items-center justify-center rounded text-ink-faint transition-colors hover:bg-white hover:text-ink"
@@ -82,11 +79,7 @@ export function ProjectRail({
       </div>
 
       <div className="studio-scroll min-h-0 flex-1 overflow-y-auto px-2 pb-3">
-        {authState !== 'authenticated' ? (
-          <p className="px-2 py-3 text-[12.5px] leading-relaxed text-ink-faint">
-            登录后可保存项目、版本与预览产物。
-          </p>
-        ) : loading ? (
+        {loading ? (
           <div className="space-y-1.5 px-1 py-1">
             {[0, 1, 2].map((i) => (
               <div key={i} className="h-9 animate-pulse rounded-md bg-line/50" />
@@ -104,6 +97,7 @@ export function ProjectRail({
                 <li key={project.id} className="group relative">
                   <button
                     type="button"
+              disabled={busy}
                     onClick={() => onSelect(project)}
                     aria-current={active ? 'true' : undefined}
                     className={cn(
@@ -136,6 +130,7 @@ export function ProjectRail({
                   </button>
                   <button
                     type="button"
+              disabled={busy}
                     onClick={() => onDelete(project)}
                     aria-label={`删除项目 ${project.name}`}
                     className="absolute right-1.5 top-2 flex h-6 w-6 items-center justify-center rounded text-ink-faint opacity-0 transition-opacity hover:bg-white hover:text-err focus-visible:opacity-100 group-hover:opacity-100"
@@ -149,27 +144,7 @@ export function ProjectRail({
         )}
       </div>
 
-      <div className="border-t border-line p-2.5">
-        {authState === 'authenticated' ? (
-          <button
-            type="button"
-            onClick={onLogout}
-            className="flex h-9 w-full items-center gap-2.5 rounded-md px-2.5 text-[13px] text-ink-soft transition-colors hover:bg-white hover:text-ink"
-          >
-            <LogOut className="h-[15px] w-[15px]" strokeWidth={1.75} />
-            退出登录
-          </button>
-        ) : (
-          <button
-            type="button"
-            onClick={onLogin}
-            disabled={authState === 'loading'}
-            className="flex h-9 w-full items-center justify-center rounded-md bg-brand px-3 text-[13px] font-medium text-white transition-colors hover:bg-[#A93A0A] disabled:opacity-50"
-          >
-            {authState === 'loading' ? '正在确认登录…' : '登录以保存进度'}
-          </button>
-        )}
-      </div>
+      <div className="border-t border-line p-3 text-xs text-ink-soft">共享数据 · 预置模拟输出</div>
     </aside>
   );
 }
