@@ -4,10 +4,12 @@
 studio_test_t1 分开；逐例调用 /__test/reset 归零。PostgreSQL 不可用时跳过整组。
 """
 import os
+from contextlib import asynccontextmanager
 
 import httpx
 import pytest
 import pytest_asyncio
+from fastapi import FastAPI
 from sqlalchemy import text
 
 os.environ["STUDIO_TEST_SCHEMA"] = "studio_test_api"
@@ -16,7 +18,51 @@ os.environ.setdefault(
     "postgresql+asyncpg://postgres:postgres@127.0.0.1:5432/postgres",
 )
 
+from core.database import get_db  # noqa: E402
+from models.auth import OIDCState, User  # noqa: E402
+from routers import auth, health  # noqa: E402
+from routers import settings as settings_router  # noqa: E402
 from testing import studio_app as host  # noqa: E402
+
+AUTH_TABLES = [User.__table__, OIDCState.__table__]
+
+
+def _api_app() -> FastAPI:
+    """认证/健康/配置接口的测试宿主，复用同一 schema 与数据库会话。"""
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        async with host.engine.begin() as connection:
+            await connection.execute(text(f'CREATE SCHEMA IF NOT EXISTS "{host.SCHEMA}"'))
+            await connection.run_sync(lambda sync: User.metadata.create_all(sync, tables=AUTH_TABLES))
+            for table in AUTH_TABLES:
+                await connection.execute(text(f'TRUNCATE "{host.SCHEMA}"."{table.name}" RESTART IDENTITY'))
+        yield
+        # 逐例释放连接池，避免连接被带到下一条用例的新事件循环（与测试宿主 lifespan 一致）。
+        await host.engine.dispose()
+
+    app = FastAPI(lifespan=lifespan)
+    app.dependency_overrides[get_db] = host.database
+    app.include_router(auth.router)
+    app.include_router(health.router)
+    app.include_router(settings_router.router)
+    return app
+
+
+@pytest_asyncio.fixture
+async def api_client():
+    """认证/健康/配置接口的进程内客户端；PostgreSQL 不可用时跳过。"""
+    try:
+        async with host.engine.connect() as conn:
+            await conn.execute(text("SELECT 1"))
+    except Exception as exc:
+        pytest.skip(f"PostgreSQL 不可用，跳过接口集成测试: {exc}")
+
+    app = _api_app()
+    async with app.router.lifespan_context(app):
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as ac:
+            yield ac
 
 
 @pytest_asyncio.fixture

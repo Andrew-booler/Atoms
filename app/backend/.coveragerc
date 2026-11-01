@@ -1,13 +1,21 @@
 [run]
 branch = True
 omit =
+    # 固定数据、模型配置与诊断（无业务分支）
     */mock_data.py
     */studio_ai.py
     */config.py
     */enums.py
-    */mask_crypto.py
     */telemetry/*
     */__init__.py
+    # 模板旁路能力：产品暂未使用，暂不列入测试（见 docs/后端测试设计与用例.md §5）
+    */aihub.py
+    */aihub_errors.py
+    */user.py
+    */storage.py
+    */projects.py
+    */studio_messages.py
+    */studio_versions.py
 
 [report]
 exclude_lines =
