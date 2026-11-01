@@ -77,27 +77,45 @@ def test_resolve_model_and_available_models():
         assert studio_output.resolve_model(profile) == "mock-fixed-v1"
 
 
-async def test_real_output_provider_delegates():
-    class RecordingAdapter:
-        def __init__(self):
-            self.calls = []
+def _patch_ai(monkeypatch, calls):
+    async def fake_plan(requirement, **kwargs):
+        calls.append(("plan", requirement, kwargs))
+        return {"summary": "计划"}
 
-        async def plan(self, requirement, **kwargs):
-            self.calls.append(("plan", requirement))
-            return {"summary": "计划"}
+    async def fake_outline(requirement, plan, **kwargs):
+        calls.append(("outline", requirement, kwargs))
+        return {"title": "结构"}
 
-        async def outline(self, requirement, plan, **kwargs):
-            self.calls.append(("outline", requirement))
-            return {"title": "结构"}
+    async def fake_artifact(requirement, plan, outline, **kwargs):
+        calls.append(("artifact", requirement, kwargs))
+        return "<html></html>"
 
-        async def artifact(self, requirement, plan, outline, **kwargs):
-            self.calls.append(("artifact", requirement))
-            return "<html></html>"
+    monkeypatch.setattr(studio_output.studio_ai, "generate_plan", fake_plan)
+    monkeypatch.setattr(studio_output.studio_ai, "generate_outline", fake_outline)
+    monkeypatch.setattr(studio_output.studio_ai, "generate_artifact", fake_artifact)
 
-    adapter = RecordingAdapter()
-    provider = studio_output.RealOutputProvider(adapter)
 
-    assert await provider.plan("需求", project_name="x", profile=None) == {"summary": "计划"}
-    assert await provider.outline("需求", {}, profile=None) == {"title": "结构"}
-    assert await provider.artifact("需求", {}, {}, profile=None) == "<html></html>"
-    assert [c[0] for c in adapter.calls] == ["plan", "outline", "artifact"]
+async def test_real_output_provider_short_circuits_example(monkeypatch):
+    calls = []
+    _patch_ai(monkeypatch, calls)
+    provider = studio_output.RealOutputProvider()
+
+    plan = await provider.plan(HYDRATION_REQ)
+    assert plan["summary"] == "做一个带进度环的每日饮水追踪器"
+    outline = await provider.outline(HYDRATION_REQ, plan)
+    assert outline["title"] == "每日饮水追踪器"
+    html = await provider.artifact(HYDRATION_REQ, plan, outline)
+    assert "每日饮水追踪器" in html
+    assert "进度环" in html
+    assert calls == []
+
+
+async def test_real_output_provider_delegates(monkeypatch):
+    calls = []
+    _patch_ai(monkeypatch, calls)
+    provider = studio_output.RealOutputProvider()
+
+    assert await provider.plan("做个完全无关的东西", project_name="x", profile=None) == {"summary": "计划"}
+    assert await provider.outline("做个完全无关的东西", {}, profile=None) == {"title": "结构"}
+    assert await provider.artifact("做个完全无关的东西", {}, {}, profile=None) == "<html></html>"
+    assert [c[0] for c in calls] == ["plan", "outline", "artifact"]

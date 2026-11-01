@@ -14,7 +14,7 @@
 | 1 | 执行与隔离层 | 把 Provider 产出的 HTML 放进 Docker 沙箱实际运行，返回 `preview_url` 替代 iframe srcDoc。建立端口分配、容器生命周期、超时回收的执行服务。 | 13 | 2-3 周 | 无 | ✅ 已完成 |
 | 2 | 多轮迭代回路 | 让用户基于已有产物提修改意见，系统把当前 artifact_html 连同意见一起发给 Provider 生成新版本。建立"看产物→提意见→出新版本"的迭代闭环。 | 5 | 约 1 周 | Phase 1 | ✅ 已完成 |
 | 3 | 代码编辑器 | 前端嵌入 Monaco/CodeMirror，允许直接编辑 artifact 源码，保存后重跑预览。支持文件树、编辑会话、Diff 对比。 | 8 | 1-2 周 | Phase 1 | ✅ 已完成 |
-| 4 | 真实 AI Provider | 替换 MockOutputProvider，接入真实大模型生成 Plan/Outline/HTML。保持响应契约不变，确保上层流程不受影响。 | 8 | 1-2 周 | Phase 2 或 Phase 3 | 方向已确认 |
+| 4 | 真实 AI Provider | 替换 MockOutputProvider，接入真实大模型生成 Plan/Outline/HTML。保持响应契约不变，确保上层流程不受影响。 | 8 | 1-2 周 | Phase 2 或 Phase 3 | ✅ 已完成 |
 | 5 | 多 Agent 协作 | 引入角色体系（Team Leader/PM/Architect/Engineer 等）和 Team Mode，实现 Agent 间交接、提问卡、计划卡审批。把单轮生成升级为团队协作。 | 21 | 3-5 周 | Phase 4 | 方向已确认 |
 | 6 | 工具与集成框架 | 建立工具注册表，支持内置工具、MCP、外部连接器三种来源，Agent 可发现并调用工具。定义统一的执行与权限模型。 | 21 | 3-5 周 | Phase 4（或 Phase 5） | 方向已确认 |
 | 7 | 安全扫描与质量门禁 | 作为内置工具实现安全扫描，构建后/发布前自动检测密钥泄漏、XSS、权限风险，出报告并支持阻断或带风险发布。 | 8 | 1-2 周 | Phase 1, Phase 6 | 方向已确认 |
@@ -252,10 +252,10 @@ Phase 9  ── 成本控制 + 备份恢复
 
 ### Phase 4：真实 AI Provider
 - **当前 mock 已增强为示例驱动：** `services/studio_examples.py` 提供 4 个完整可交互示范网页（饮水追踪器 / 任务看板 / 记账本 / 读书笔记库）与一个通用演示页；`MockOutputProvider` 按需求命中示例返回对应三件套（plan / outline / html），未命中返回通用页。接真实 Provider 后，若用户输入与示例文本相同，应**短路返回对应示范网页**，不调用真实模型，保证首体验稳定。
-- `services/studio_output.py` 中 `RealOutputProvider` 契约已存在，默认不创建不调用。
-- 替换 `MockOutputProvider`，接入真实大模型，保持 Plan/Outline/HTML 响应形状不变。
-- 建议在 Phase 2 或 Phase 3 跑通后再接入，以便用真实生成内容验证迭代回路与编辑器。
-- **决策点（Phase 4 启动时定）**：
+- **状态：已完成。** `services/studio_output.py` 中 `RealOutputProvider` 实现为真实调用 `services/studio_ai.py` 的编排层（`generate_plan` / `generate_outline` / `generate_artifact`），并保留示例短路：任一方法先 `match_example(requirement)`，命中即返回对应示范网页（`deepcopy` 隔离 plan/outline，html 原样返回），不调用真实模型。启用方式为环境变量 `APP_AI_BASE_URL` + `APP_AI_KEY`（二者齐备才启用），`get_provider()` 据此惰性返回 `RealOutputProvider` 或回退 `MockOutputProvider`；`resolve_model()` / `available_models()` 按同样开关分派到 `studio_ai` 或返回 mock 模型（`mock-fixed-v1`）。真实模型的模型列表由 `studio_ai.MODEL_PROFILES` 维护（balanced / fast / quality 三档），密钥经 `core/config.py` 的 `settings.app_ai_key` 动态读取环境变量，不写死在代码里。`generate_artifact` 支持 `context`（基线 HTML）参数，使 Phase 2 的"按上下文智能修改"在真实模式下生效。
+- `services/studio_ai.py` 通过 `AIHubService`（OpenAI 兼容 `AsyncOpenAI`，`base_url=APP_AI_BASE_URL` + `api_key=APP_AI_KEY`）完成三次模型调用，并对产物做 `sanitize_html()` 清洗（带一次失败重试）。
+- 替换 `MockOutputProvider` 已完成，Plan/Outline/HTML 响应形状不变，上层流程无感知。
+- **决策点（Phase 4 启动时定，已收敛）**：
   - 模型选型：需确认是否支持 **function-calling / tool use**（直接影响 Phase 5 多 Agent 交接和 Phase 6 工具调用）。
   - 是否同时提供 **embedding API**（影响 Phase 11 知识库，若无则需单独接入 embedding 模型）。
   - API key 的存储与轮换方案（不写死在代码里）。

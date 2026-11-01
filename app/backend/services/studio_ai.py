@@ -282,8 +282,15 @@ async def generate_artifact(
     outline: Dict[str, Any],
     *,
     profile: Optional[str] = None,
+    context: Optional[str] = None,
 ) -> str:
     model = resolve_model(profile)
+    context_block = ""
+    if context:
+        context_block = (
+            "\n需要在其基础上修改的现有 HTML（保持单文件、无外部依赖）：\n"
+            f"{context}\n"
+        )
     user = f"""实现下面这个原型，输出完整的单文件 HTML 应用。
 
 需求：{requirement}
@@ -292,7 +299,7 @@ async def generate_artifact(
 界面结构：{json.dumps(outline.get("sections", []), ensure_ascii=False)}
 必须可用的交互：{json.dumps(outline.get("interactions", []), ensure_ascii=False)}
 示例数据：{json.dumps(outline.get("seed_data", []), ensure_ascii=False)}
-
+{context_block}
 界面语言与需求语言保持一致。现在直接输出 HTML。"""
 
     raw = await _gentxt(
