@@ -5,6 +5,9 @@
 from services import studio_output
 
 
+HYDRATION_REQ = "一个记录每日饮水量的追踪器，带进度环"
+
+
 def test_get_provider_default_and_injection():
     original = studio_output._provider
     try:
@@ -21,43 +24,48 @@ def test_get_provider_default_and_injection():
         studio_output._provider = original
 
 
-async def test_mock_provider_plan_outline_deepcopy():
+async def test_mock_provider_example_plan_outline():
     provider = studio_output.MockOutputProvider()
 
-    plan1 = await provider.plan("记录饮水")
-    plan2 = await provider.plan("增加备注")
-    assert plan1["summary"] == "演示计划一"
-    assert plan2["summary"] == "演示计划二"
+    plan = await provider.plan(HYDRATION_REQ)
+    assert plan["summary"] == "做一个带进度环的每日饮水追踪器"
+    assert {step["title"] for step in plan["steps"]} == {"搭建进度环", "杯量快捷记录", "今日记录"}
 
+    outline = await provider.outline(HYDRATION_REQ, plan)
+    assert outline["title"] == "每日饮水追踪器"
+    assert [section["name"] for section in outline["sections"]] == ["进度概览", "快捷记录", "今日记录"]
+
+
+async def test_mock_provider_generic_plan_outline():
+    provider = studio_output.MockOutputProvider()
+
+    plan = await provider.plan("做个完全无关的东西")
+    assert plan["summary"] == "演示通用可交互原型"
+
+    outline = await provider.outline("做个完全无关的东西", plan)
+    assert outline["title"] == "原型预览"
+
+
+async def test_mock_provider_deepcopy_isolation():
+    provider = studio_output.MockOutputProvider()
+
+    plan1 = await provider.plan(HYDRATION_REQ)
     plan1["summary"] = "MUTATED"
     plan1["steps"][0]["title"] = "MUTATED"
-    plan1_again = await provider.plan("记录饮水")
-    assert plan1_again["summary"] == "演示计划一"
-    assert plan1_again["steps"][0]["title"] == "显示演示"
+
+    plan1_again = await provider.plan(HYDRATION_REQ)
+    assert plan1_again["summary"] == "做一个带进度环的每日饮水追踪器"
+    assert plan1_again["steps"][0]["title"] == "搭建进度环"
     assert plan1_again is not plan1
 
-    outline1 = await provider.outline("记录饮水", plan1)
-    outline2 = await provider.outline("增加备注", plan2)
-    assert outline1["title"] == "演示页面一"
-    assert outline2["title"] == "演示页面二"
 
-
-def test_fixed_html_versions():
-    v1 = studio_output.fixed_html()
-    v2 = studio_output.fixed_html(second=True)
-    assert "模拟第一版" in v1
-    assert "模拟第二版" in v2
-    for html in (v1, v2):
-        assert "<!DOCTYPE html>" in html
-        assert "<body" in html
-        assert "</html>" in html
-        assert "演示计数" in html
-
-
-async def test_artifact_returns_fixed_html():
+async def test_artifact_returns_example_html():
     provider = studio_output.MockOutputProvider()
-    assert await provider.artifact("记录饮水", {}, {}) == studio_output.fixed_html()
-    assert await provider.artifact("增加备注", {}, {}) == studio_output.fixed_html(second=True)
+    html = await provider.artifact(HYDRATION_REQ, {}, {})
+    assert "<!DOCTYPE html>" in html
+    assert "<body" in html
+    assert "</html>" in html
+    assert "每日饮水追踪器" in html
 
 
 def test_resolve_model_and_available_models():

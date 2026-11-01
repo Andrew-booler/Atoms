@@ -1,29 +1,19 @@
-"""确定性输出边界：默认只返回预置数据，真实提供者须显式注入。"""
+"""确定性输出边界。
+
+默认返回示例驱动的预置输出（见 studio_examples），真实提供者须显式注入
+或通过环境变量启用。三个阶段（plan/outline/artifact）保持同一响应形状，
+前端与存储层无需感知底层是 mock 还是真实模型。
+"""
+
 from copy import deepcopy
 from typing import Protocol
 
+from services.studio_examples import fixture as example_fixture
+
+# 向后兼容的公开出口：历史调用方（测试、宿主注入）依赖 studio_output.fixture。
+fixture = example_fixture
+
 DEFAULT_PROFILE = "balanced"
-
-
-def fixed_html(second: bool = False) -> str:
-    label = "模拟第二版" if second else "模拟第一版"
-    return f'''<!DOCTYPE html>
-<html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{label}</title>
-<style>body{{font-family:system-ui;margin:32px;color:#1a1a18;background:#fafaf8}}button{{padding:12px;background:#c2410c;color:white;border:0;border-radius:8px}}:focus-visible{{outline:3px solid #15803d}}</style></head>
-<body><h1>{label}</h1><p>固定预览文档，不调用真实模型。</p><button id="counter">演示计数：0</button>
-<script>let count=0;document.getElementById('counter').onclick=function(){{this.textContent='演示计数：'+(++count)}};</script></body></html>'''
-
-
-def fixture(requirement: str) -> dict:
-    second = "增加备注" in requirement
-    return {
-        "plan": {"summary": "演示计划二" if second else "演示计划一", "stack": ["HTML"],
-                 "steps": [{"title": "显示备注" if second else "显示演示", "detail": "使用第二套预置页面" if second else "使用预置页面"}],
-                 "files": [{"path": "index.html", "purpose": "固定预览"}]},
-        "outline": {"title": "演示页面二" if second else "演示页面一", "sections": [{"name": "备注区" if second else "演示区", "blocks": ["计数"]}],
-                    "interactions": ["演示计数"], "seed_data": ["0"]},
-        "html": fixed_html(second),
-    }
 
 
 class OutputProvider(Protocol):  # pragma: no cover - 类型协议，无运行时逻辑
@@ -33,18 +23,21 @@ class OutputProvider(Protocol):  # pragma: no cover - 类型协议，无运行�
 
 
 class MockOutputProvider:
+    """示例驱动的确定性输出，命中示例返回对应示范网页，否则返回通用演示页。"""
+
     async def plan(self, requirement: str, **kwargs) -> dict:
-        return deepcopy(fixture(requirement)["plan"])
+        return deepcopy(example_fixture(requirement)["plan"])
 
     async def outline(self, requirement: str, plan: dict, **kwargs) -> dict:
-        return deepcopy(fixture(requirement)["outline"])
+        return deepcopy(example_fixture(requirement)["outline"])
 
     async def artifact(self, requirement: str, plan: dict, outline: dict, **kwargs) -> str:
-        return fixture(requirement)["html"]
+        return example_fixture(requirement)["html"]
 
 
 class RealOutputProvider:
-    """仅保留注入契约，默认不创建、不调用真实模型。"""
+    """真实模型输出：通过注入的 adapter 委托三阶段生成。"""
+
     def __init__(self, adapter: OutputProvider):
         self.adapter = adapter
 

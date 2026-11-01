@@ -177,12 +177,12 @@ async def test_integration_07_outline_route(client):
     project = (await client.post(f"{API}/projects", json={"name": "结构", "description": ""})).json()
     resp = await client.post(
         f"{API}/projects/{project['id']}/outline",
-        json={"requirement": "做个演示页", "plan_summary": "演示计划一", "profile": None},
+        json={"requirement": "一个记录每日饮水量的追踪器，带进度环", "plan_summary": "做一个带进度环的每日饮水追踪器", "profile": None},
     )
     assert resp.status_code == 200
     data = resp.json()
     assert data["model"] == "mock-fixed-v1"
-    assert data["outline"]["title"] == "演示页面一"
+    assert data["outline"]["title"] == "每日饮水追踪器"
     assert data["outline"]["sections"]
 
 

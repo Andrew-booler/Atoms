@@ -74,8 +74,8 @@ async def test_controlled_provider_invalid():
 async def test_controlled_provider_delay():
     provider = host.ControlledProvider()
     host.state.update(stage="plan", mode="delay", remaining=1)
-    result = await provider.plan("记录饮水")
-    assert result["summary"] == "演示计划一"  # 延迟后仍返回正常固定结果
+    result = await provider.plan("一个记录每日饮水量的追踪器，带进度环")
+    assert result["summary"] == "做一个带进度环的每日饮水追踪器"  # 延迟后仍返回正常示例结果
     host.state.update(stage="", mode="", remaining=0)
 
 

@@ -11,7 +11,7 @@
 
 | Phase | 名称 | 核心目标（2-3 句） | Point | 粗略时间 | 依赖 | 状态 |
 |---|---|---|---|---|---|---|
-| 1 | 执行与隔离层 | 把 Provider 产出的 HTML 放进 Docker 沙箱实际运行，返回 `preview_url` 替代 iframe srcDoc。建立端口分配、容器生命周期、超时回收的执行服务。 | 13 | 2-3 周 | 无 | 计划已写，待批准 |
+| 1 | 执行与隔离层 | 把 Provider 产出的 HTML 放进 Docker 沙箱实际运行，返回 `preview_url` 替代 iframe srcDoc。建立端口分配、容器生命周期、超时回收的执行服务。 | 13 | 2-3 周 | 无 | ✅ 已完成 |
 | 2 | 多轮迭代回路 | 让用户基于已有产物提修改意见，系统把当前 artifact_html 连同意见一起发给 Provider 生成新版本。建立"看产物→提意见→出新版本"的迭代闭环。 | 5 | 约 1 周 | Phase 1 | 方向已确认 |
 | 3 | 代码编辑器 | 前端嵌入 Monaco/CodeMirror，允许直接编辑 artifact 源码，保存后重跑预览。支持文件树、编辑会话、Diff 对比。 | 8 | 1-2 周 | Phase 1 | 方向已确认 |
 | 4 | 真实 AI Provider | 替换 MockOutputProvider，接入真实大模型生成 Plan/Outline/HTML。保持响应契约不变，确保上层流程不受影响。 | 8 | 1-2 周 | Phase 2 或 Phase 3 | 方向已确认 |
@@ -229,6 +229,7 @@ Phase 9  ── 成本控制 + 备份恢复
 - 方案：1A（隔离静态服务）+ 2A（Docker 容器）+ 3A（临时服务超时回收）。
 - HTML 写入隔离工作区 → `docker run` 起 `nginx:alpine`（只读挂载、`--cap-drop=ALL`、`--read-only`、`-p 127.0.0.1:<port>:80`、CPU/内存/PID 限制）→ 返回 `http://127.0.0.1:<port>/` → 超时回收。
 - 详细计划见 [execution_sandbox_plan](execution_sandbox_plan.md)。
+- **状态：已完成。** `services/execution.py` 已实现 `ExecutionService.run_html()`，端口分配、容器生命周期与超时回收均已落地，并有单元测试覆盖。
 
 ### Phase 2：多轮迭代回路
 - 用户在预览旁输入修改意见（如"把标题改成红色"），后端把当前 `artifact_html` + 修改意见传给 Output provider，生成新 HTML，存为新版本（`version_no + 1`），更新项目 `current_version`。
@@ -248,6 +249,7 @@ Phase 9  ── 成本控制 + 备份恢复
   - 编辑保存语义：保存为新版本（保留历史）vs 覆盖当前版本（Atoms 是编辑会话 Submit all 后应用）。
 
 ### Phase 4：真实 AI Provider
+- **当前 mock 已增强为示例驱动：** `services/studio_examples.py` 提供 4 个完整可交互示范网页（饮水追踪器 / 任务看板 / 记账本 / 读书笔记库）与一个通用演示页；`MockOutputProvider` 按需求命中示例返回对应三件套（plan / outline / html），未命中返回通用页。接真实 Provider 后，若用户输入与示例文本相同，应**短路返回对应示范网页**，不调用真实模型，保证首体验稳定。
 - `services/studio_output.py` 中 `RealOutputProvider` 契约已存在，默认不创建不调用。
 - 替换 `MockOutputProvider`，接入真实大模型，保持 Plan/Outline/HTML 响应形状不变。
 - 建议在 Phase 2 或 Phase 3 跑通后再接入，以便用真实生成内容验证迭代回路与编辑器。
