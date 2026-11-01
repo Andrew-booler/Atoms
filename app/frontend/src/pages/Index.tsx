@@ -22,6 +22,7 @@ export default function StudioPage() {
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [activeVersion, setActiveVersion] = useState<number | null>(null);
   const [requirement, setRequirement] = useState('');
+  const [revision, setRevision] = useState('');
   const [models, setModels] = useState<ModelOption[]>([]);
   const [profile, setProfile] = useState('balanced');
   const [busy, setBusy] = useState(false);
@@ -175,6 +176,39 @@ export default function StudioPage() {
   const revisePlan = (message: StudioMessage) => {
     if (!operation.busy) { setRequirement(message.meta.requirement ?? ''); setMobileTab('chat'); }
   };
+
+  const submitRevision = () => {
+    const note = revision.trim();
+    if (!note || operation.busy || !activeProject || activeVersion == null) return;
+    const projectId = activeProject.id;
+    const selectedProfile = profile;
+    const baseVersion = versions.find(item => item.version_no === activeVersion);
+    if (!baseVersion) return;
+    let built: BuildResponse | null = null;
+    let outline: OutlinePayload | null = null;
+    void operation.run(async () => {
+      setBuilding(true);
+      try {
+        if (!built) {
+          setStageLabel('正在根据修改意见生成新版本…');
+          if (!outline) outline = (await studioApi.outline(projectId, note, '', selectedProfile)).outline;
+          built = await studioApi.artifact(projectId, {
+            requirement: note,
+            plan_summary: '',
+            outline,
+            profile: selectedProfile,
+            base_version_id: baseVersion.id,
+            revision_note: note,
+          });
+        }
+        updateSummary(built.project);
+        setArtifactHtml(built.artifact_html); setPreviewUrl(built.preview_url ?? null); setActiveVersion(built.version.version_no);
+        applyDetail(await studioApi.getProject(projectId));
+        setRevision('');
+        setMobileTab('preview');
+      } finally { setBuilding(false); setStageLabel(''); }
+    });
+  };
   const hasPendingPlan = messages.some(item => item.kind === 'plan' && !item.meta.approved);
   const rail = <ProjectRail projects={projects} activeId={activeProject?.id ?? null} loading={busy && projects.length === 0} busy={busy} activeNav="studio" onSelect={openProject} onCreate={startNewProject} onDelete={removeProject} onNavigate={target => { if (!operation.busy && target !== 'studio') navigate(`/${target}`); }} />;
 
@@ -190,6 +224,29 @@ export default function StudioPage() {
       <div className="flex min-h-0 flex-1">
         <section aria-label="需求对话" className={cn('flex min-h-0 w-full flex-col lg:w-[46%] lg:border-r lg:border-line', mobileTab === 'preview' && 'hidden lg:flex')}>
           {messages.length === 0 && !busy && !error ? <div className="flex flex-1 flex-col justify-center px-6"><h2 className="text-[22px] font-semibold text-ink">描述需求，先看计划，<br />确认后查看固定预览。</h2><p className="mt-3 text-sm leading-7 text-ink-soft">本阶段使用预置模拟计划、结构和HTML，不调用真实模型。每次成功构建保存为独立历史版本。</p></div> : <ConversationStream messages={messages} planState={building ? 'running' : hasPendingPlan ? 'pending' : 'done'} runningPlanId={runningPlan} onApprove={approvePlan} onRevise={revisePlan} onRetry={operation.canRetry ? () => void operation.retry() : undefined} busy={busy} error={error} buildStage={stageLabel} onCopy={action => operation.run(action)} />}
+          {activeProject && activeVersion != null && (
+            <div className="border-t border-line bg-paper px-4 py-2">
+              <div className="mx-auto flex w-full max-w-[720px] items-center gap-2">
+                <input
+                  value={revision}
+                  onChange={event => { if (!operation.busy) setRevision(event.target.value); }}
+                  onKeyDown={event => { if (event.key === 'Enter' && !operation.busy && revision.trim()) submitRevision(); }}
+                  placeholder="对当前成品提修改意见，例如：把标题改成红色"
+                  aria-label="修改意见"
+                  disabled={busy}
+                  className="min-w-0 flex-1 rounded-md border border-line-strong bg-canvas px-3 py-2 text-[13px] leading-[1.5] text-ink placeholder:text-ink-faint outline-none transition-colors focus:border-ink-faint disabled:opacity-60"
+                />
+                <button
+                  type="button"
+                  onClick={submitRevision}
+                  disabled={!revision.trim() || busy}
+                  className="inline-flex h-9 shrink-0 items-center rounded-md bg-brand px-3 text-[12.5px] font-medium text-white transition-colors hover:bg-[#A93A0A] disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  生成新版本
+                </button>
+              </div>
+            </div>
+          )}
           <RequirementComposer value={requirement} onChange={value => { if (!operation.busy) setRequirement(value); }} onSubmit={submitRequirement} busy={busy} disabled={busy} placeholder={activeProject ? '继续输入，例如：增加备注' : '输入需求，例如：记录饮水'} models={models} profile={profile} onProfileChange={value => { if (!operation.busy) setProfile(value); }} suggestions={!messages.length ? SUGGESTIONS : []} hint="先取得模拟计划，确认后保存模拟HTML与版本。" />
         </section>
         <div className={cn('min-h-0 flex-1 lg:flex', mobileTab === 'preview' ? 'flex' : 'hidden')}><ArtifactPreview html={artifactHtml} previewUrl={previewUrl} title={activeProject?.name || '原型'} busy={busy} stageLabel={stageLabel} versions={versions} activeVersion={activeVersion} onRestore={restoreVersion} restoring={busy} onAction={action => operation.run(action)} /></div>

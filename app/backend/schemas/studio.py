@@ -110,6 +110,8 @@ class ArtifactRequest(BaseModel):
     plan_summary: str = ""
     outline: OutlinePayload
     profile: Optional[str] = None
+    base_version_id: Optional[int] = None
+    revision_note: Optional[str] = None
 
 
 class BuildResponse(BaseModel):

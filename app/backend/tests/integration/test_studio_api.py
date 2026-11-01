@@ -308,3 +308,57 @@ async def test_integration_11_stage_failures_map_502(client):
     )
     assert resp.status_code == 502
     assert "产物生成失败" in resp.json()["detail"]
+
+
+# 集成-12：artifact base_version_id —— 迭代生成新版本并记录基线
+async def test_integration_12_revision_creates_new_version(client):
+    project = (await client.post(f"{API}/projects", json={"name": "迭代", "description": ""})).json()
+    pid = project["id"]
+    req = "记录饮水"
+    plan_summary = _plan_request_text(studio_output.fixture(req)["plan"])
+    outline = studio_output.fixture(req)["outline"]
+    await client.post(f"{API}/projects/{pid}/plan", json={"requirement": req})
+    first = await client.post(
+        f"{API}/projects/{pid}/artifact",
+        json={"requirement": req, "plan_summary": plan_summary, "outline": outline},
+    )
+    assert first.status_code == 200
+    base_id = first.json()["version"]["id"]
+
+    note = "把标题改成红色"
+    rev_outline = (await client.post(
+        f"{API}/projects/{pid}/outline",
+        json={"requirement": note, "plan_summary": ""},
+    )).json()["outline"]
+    second = await client.post(
+        f"{API}/projects/{pid}/artifact",
+        json={
+            "requirement": note,
+            "plan_summary": "",
+            "outline": rev_outline,
+            "base_version_id": base_id,
+            "revision_note": note,
+        },
+    )
+    assert second.status_code == 200
+    data = second.json()
+    assert data["version"]["version_no"] == 2
+    assert "迭代自 v1" in data["version"]["label"]
+
+    detail = (await client.get(f"{API}/projects/{pid}")).json()
+    assert detail["project"]["current_version"] == 2
+    assert len(detail["versions"]) == 2
+
+    # 不存在的基线版本 -> 404，不产生副作用
+    resp = await client.post(
+        f"{API}/projects/{pid}/artifact",
+        json={
+            "requirement": note,
+            "plan_summary": "",
+            "outline": rev_outline,
+            "base_version_id": 999999,
+        },
+    )
+    assert resp.status_code == 404
+    detail_after = (await client.get(f"{API}/projects/{pid}")).json()
+    assert len(detail_after["versions"]) == 2

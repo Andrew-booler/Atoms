@@ -12,7 +12,7 @@
 | Phase | 名称 | 核心目标（2-3 句） | Point | 粗略时间 | 依赖 | 状态 |
 |---|---|---|---|---|---|---|
 | 1 | 执行与隔离层 | 把 Provider 产出的 HTML 放进 Docker 沙箱实际运行，返回 `preview_url` 替代 iframe srcDoc。建立端口分配、容器生命周期、超时回收的执行服务。 | 13 | 2-3 周 | 无 | ✅ 已完成 |
-| 2 | 多轮迭代回路 | 让用户基于已有产物提修改意见，系统把当前 artifact_html 连同意见一起发给 Provider 生成新版本。建立"看产物→提意见→出新版本"的迭代闭环。 | 5 | 约 1 周 | Phase 1 | 方向已确认 |
+| 2 | 多轮迭代回路 | 让用户基于已有产物提修改意见，系统把当前 artifact_html 连同意见一起发给 Provider 生成新版本。建立"看产物→提意见→出新版本"的迭代闭环。 | 5 | 约 1 周 | Phase 1 | ✅ 已完成 |
 | 3 | 代码编辑器 | 前端嵌入 Monaco/CodeMirror，允许直接编辑 artifact 源码，保存后重跑预览。支持文件树、编辑会话、Diff 对比。 | 8 | 1-2 周 | Phase 1 | 方向已确认 |
 | 4 | 真实 AI Provider | 替换 MockOutputProvider，接入真实大模型生成 Plan/Outline/HTML。保持响应契约不变，确保上层流程不受影响。 | 8 | 1-2 周 | Phase 2 或 Phase 3 | 方向已确认 |
 | 5 | 多 Agent 协作 | 引入角色体系（Team Leader/PM/Architect/Engineer 等）和 Team Mode，实现 Agent 间交接、提问卡、计划卡审批。把单轮生成升级为团队协作。 | 21 | 3-5 周 | Phase 4 | 方向已确认 |
@@ -235,6 +235,7 @@ Phase 9  ── 成本控制 + 备份恢复
 - 用户在预览旁输入修改意见（如"把标题改成红色"），后端把当前 `artifact_html` + 修改意见传给 Output provider，生成新 HTML，存为新版本（`version_no + 1`），更新项目 `current_version`。
 - 保持 Output provider 契约不变，仅在请求中携带上一版 artifact_html 作为上下文。
 - 需要前端新增"修改意见"输入区，后端 artifact 路由支持传入 `base_version_id`。
+- **状态：已完成。** `ArtifactRequest` 新增 `base_version_id` / `revision_note`；artifact 路由按 `base_version_id` 加载基线版本并把其 `artifact_html` 作为 `context` 透传给 Provider，落库时 label 追加"（迭代自 vX）"、`plan_summary` 兜底为基线值。前端在预览区显示"修改意见"输入框，提交后走 outline + artifact 生成新版本。Mock 阶段仅验证"提意见 → 新版本号递增 → 旧版本保留"的闭环，真实按上下文智能修改在 Phase 4 接入后生效。
 - **决策点（Phase 2 启动时定）**：
   - 传给 Provider 的上下文是完整 `artifact_html` 还是 diff（首期建议传完整 HTML，简单可靠）。
   - 新版本的 `version_no` 策略：当前最大序号 +1，恢复历史版本后再构建取历史最大 +1。

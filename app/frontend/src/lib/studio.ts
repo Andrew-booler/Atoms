@@ -216,6 +216,8 @@ export const studioApi = {
       plan_summary: string;
       outline: OutlinePayload;
       profile?: string;
+      base_version_id?: number;
+      revision_note?: string;
     }
   ): Promise<BuildResponse> {
     const res = await client.apiCall.invoke({

@@ -376,12 +376,24 @@ async def artifact(
     await _load_project(db, project_id, SHARED_CONTEXT)
     await _commit(db)
 
+    base_version = None
+    if data.base_version_id is not None:
+        result = await db.execute(select(Studio_versions).where(
+            Studio_versions.id == data.base_version_id,
+            Studio_versions.project_id == project_id,
+        ))
+        base_version = result.scalar_one_or_none()
+        if base_version is None:
+            raise HTTPException(status_code=404, detail="基线版本不存在")
+
     try:
         artifact_html = await studio_ai.get_provider().artifact(
             data.requirement,
             {"summary": data.plan_summary, "steps": []},
             data.outline.model_dump(),
             profile=data.profile,
+            context=base_version.artifact_html if base_version else None,
+            base_version_id=data.base_version_id,
         )
     except HTTPException:
         raise
@@ -413,13 +425,17 @@ async def artifact(
     )
     next_no = int(latest or 0) + 1
     title = data.outline.title or "原型"
+    label = f"v{next_no} · {title}"
+    if base_version:
+        label += f"（迭代自 v{base_version.version_no}）"
+    plan_summary = data.plan_summary or (base_version.plan_summary if base_version else "")
 
     version = Studio_versions(
         user_id=SHARED_CONTEXT,
         project_id=project_id,
         version_no=next_no,
-        label=f"v{next_no} · {title}",
-        plan_summary=data.plan_summary,
+        label=label,
+        plan_summary=plan_summary,
         artifact_html=artifact_html,
     )
     db.add(version)
@@ -439,6 +455,7 @@ async def artifact(
             "sections": [section.get("name") for section in data.outline.sections],
             "interactions": data.outline.interactions,
             "model": studio_ai.resolve_model(data.profile),
+            "base_version_id": data.base_version_id,
         },
     )
 
