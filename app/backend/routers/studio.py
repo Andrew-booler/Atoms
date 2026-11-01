@@ -14,6 +14,7 @@ from models.studio_versions import Studio_versions
 from schemas.studio import (
     ArtifactRequest,
     BuildResponse,
+    ExecutionResponse,
     MessageCreate,
     MessageOut,
     ModelOption,
@@ -32,6 +33,7 @@ from schemas.studio import (
     VersionSummary,
 )
 from services import studio_output as studio_ai
+from services.execution import DockerNotAvailableError, ExecutionService
 from services.studio_validation import (
     validate_artifact_html,
     validate_outline_payload,
@@ -350,6 +352,20 @@ async def outline(
     return OutlineResponse(outline=payload, model=studio_ai.resolve_model(data.profile))
 
 
+async def _try_run_preview(db: AsyncSession, html: str, version_id: int) -> Optional[str]:
+    """尝试启动沙箱预览；Docker 不可用或失败时返回 None，不抛出。"""
+    service = ExecutionService(db)
+    try:
+        execution = await service.run_html(html, version_id)
+        return execution.preview_url
+    except DockerNotAvailableError as exc:
+        logger.warning("沙箱不可用，artifact 已保存但预览未启动：%s", exc)
+        return None
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("启动沙箱预览失败：%s", exc, exc_info=True)
+        return None
+
+
 @router.post("/projects/{project_id}/artifact", response_model=BuildResponse)
 async def artifact(
     project_id: int,
@@ -388,7 +404,8 @@ async def artifact(
         saved = (await db.execute(select(Studio_versions).where(Studio_versions.id == version_id))).scalar_one()
         builds = (await db.execute(select(Studio_messages).where(Studio_messages.project_id == project_id, Studio_messages.kind == "build"))).scalars().all()
         saved_message = next(row for row in builds if _parse_meta(row.meta).get("version_id") == version_id)
-        return BuildResponse(project=await _summary(db, project), version=VersionSummary(id=saved.id,version_no=saved.version_no,label=saved.label,created_at=saved.created_at),message=_message_out(saved_message),outline_title=data.outline.title,artifact_html=saved.artifact_html)
+        preview_url = await _try_run_preview(db, saved.artifact_html, saved.id)
+        return BuildResponse(project=await _summary(db, project), version=VersionSummary(id=saved.id,version_no=saved.version_no,label=saved.label,created_at=saved.created_at),message=_message_out(saved_message),outline_title=data.outline.title,artifact_html=saved.artifact_html, preview_url=preview_url)
     latest = await db.scalar(
         select(func.max(Studio_versions.version_no)).where(
             Studio_versions.project_id == project_id
@@ -433,6 +450,8 @@ async def artifact(
     project.preview_ready = True
     await _commit(db)
 
+    preview_url = await _try_run_preview(db, artifact_html, version.id)
+
     return BuildResponse(
         project=await _summary(db, project),
         version=VersionSummary(
@@ -444,6 +463,7 @@ async def artifact(
         message=_message_out(message),
         outline_title=title,
         artifact_html=artifact_html,
+        preview_url=preview_url,
     )
 
 
@@ -466,6 +486,56 @@ async def get_version(
         plan_summary=version.plan_summary,
         artifact_html=version.artifact_html,
         created_at=version.created_at,
+    )
+
+
+@router.post("/versions/{version_id}/run", response_model=ExecutionResponse)
+async def run_version(
+    version_id: int,
+    db: AsyncSession = Depends(get_db),
+) -> ExecutionResponse:
+    """对已保存版本重新启动沙箱预览。"""
+    result = await db.execute(select(Studio_versions).where(Studio_versions.id == version_id))
+    version = result.scalar_one_or_none()
+    if version is None:
+        raise HTTPException(status_code=404, detail="版本不存在")
+
+    service = ExecutionService(db)
+    try:
+        execution = await service.run_html(version.artifact_html, version_id)
+    except DockerNotAvailableError as exc:
+        raise HTTPException(status_code=503, detail=f"沙箱不可用：{exc}") from exc
+    except Exception as exc:  # noqa: BLE001
+        logger.error("启动版本预览失败：%s", exc, exc_info=True)
+        raise HTTPException(status_code=502, detail=f"启动预览失败：{exc}") from exc
+
+    return ExecutionResponse(
+        id=execution.id,
+        version_id=execution.version_id,
+        status=execution.status,
+        preview_url=execution.preview_url,
+        started_at=execution.started_at,
+        expires_at=execution.expires_at,
+    )
+
+
+@router.delete("/executions/{execution_id}", response_model=ExecutionResponse)
+async def stop_execution(
+    execution_id: int,
+    db: AsyncSession = Depends(get_db),
+) -> ExecutionResponse:
+    """停止并清理一个沙箱执行。"""
+    service = ExecutionService(db)
+    execution = await service.stop(execution_id)
+    if execution is None:
+        raise HTTPException(status_code=404, detail="执行不存在")
+    return ExecutionResponse(
+        id=execution.id,
+        version_id=execution.version_id,
+        status=execution.status,
+        preview_url=execution.preview_url,
+        started_at=execution.started_at,
+        expires_at=execution.expires_at,
     )
 
 

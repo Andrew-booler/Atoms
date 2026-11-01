@@ -107,6 +107,7 @@ export interface BuildResponse {
   message: StudioMessage;
   outline_title: string;
   artifact_html: string;
+  preview_url?: string | null;
 }
 
 const getErrorDetail = (error: unknown): string => {

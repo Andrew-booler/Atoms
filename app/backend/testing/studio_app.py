@@ -6,14 +6,20 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
+from sqlalchemy.pool import NullPool
 from routers import studio
 from services import studio_output
 from core.database import get_db
+from models.execution import Execution
 
 SCHEMA = os.environ.get("STUDIO_TEST_SCHEMA", "studio_test_t1")
 if not re.fullmatch(r"studio_test_[a-z0-9_]+", SCHEMA):
     raise RuntimeError("测试命名空间必须以studio_test_开头")
-engine = create_async_engine(os.environ["DATABASE_URL"], execution_options={"schema_translate_map": {None: SCHEMA}})
+engine = create_async_engine(
+    os.environ["DATABASE_URL"],
+    execution_options={"schema_translate_map": {None: SCHEMA}},
+    poolclass=NullPool,
+)
 state = {"stage": "", "mode": "", "remaining": 0}
 
 
@@ -60,7 +66,7 @@ class ControlledProvider(studio_output.MockOutputProvider):
         return await super().artifact(requirement, plan, outline, **kwargs)
 
 
-TABLES = [studio.Projects.__table__, studio.Studio_messages.__table__, studio.Studio_versions.__table__]
+TABLES = [studio.Projects.__table__, studio.Studio_messages.__table__, studio.Studio_versions.__table__, Execution.__table__]
 
 
 @asynccontextmanager
@@ -82,7 +88,7 @@ app.include_router(studio.router)
 async def reset():
     state.update(stage="", mode="", remaining=0)
     async with engine.begin() as connection:
-        await connection.execute(text(f'TRUNCATE "{SCHEMA}".studio_messages, "{SCHEMA}".studio_versions, "{SCHEMA}".projects RESTART IDENTITY'))
+        await connection.execute(text(f'TRUNCATE "{SCHEMA}".studio_messages, "{SCHEMA}".studio_versions, "{SCHEMA}".projects, "{SCHEMA}".executions RESTART IDENTITY'))
     return {"schema": SCHEMA, "reset": True}
 
 

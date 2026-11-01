@@ -48,7 +48,11 @@ def alembic_include_object(object, name, type_, reflected, compare_to):
 
 
 async def run_migrations_online():
-    database_url = prepare_async_database_url(config.get_main_option("sqlalchemy.url"))
+    database_url = config.get_main_option("sqlalchemy.url")
+    if not database_url or database_url.strip() in ('""', "''"):
+        import os
+        database_url = os.environ.get("DATABASE_URL", "")
+    database_url = prepare_async_database_url(database_url)
     connectable = create_async_engine(database_url, poolclass=pool.NullPool)
     async with connectable.connect() as connection:
         await connection.run_sync(

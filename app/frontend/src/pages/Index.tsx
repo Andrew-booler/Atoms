@@ -19,6 +19,7 @@ export default function StudioPage() {
   const [messages, setMessages] = useState<StudioMessage[]>([]);
   const [versions, setVersions] = useState<VersionSummary[]>([]);
   const [artifactHtml, setArtifactHtml] = useState<string | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [activeVersion, setActiveVersion] = useState<number | null>(null);
   const [requirement, setRequirement] = useState('');
   const [models, setModels] = useState<ModelOption[]>([]);
@@ -41,6 +42,7 @@ export default function StudioPage() {
     setMessages(detail.messages);
     setVersions(detail.versions);
     setArtifactHtml(detail.current_artifact ?? null);
+    setPreviewUrl(null);
     setActiveVersion(detail.project.current_version ?? null);
   };
 
@@ -58,7 +60,7 @@ export default function StudioPage() {
 
   const startNewProject = () => {
     if (operation.busy) return;
-    setActiveProject(null); setMessages([]); setVersions([]); setArtifactHtml(null);
+    setActiveProject(null); setMessages([]); setVersions([]); setArtifactHtml(null); setPreviewUrl(null);
     setActiveVersion(null); setError(null); setMobileTab('chat'); setDrawer(false);
   };
   const openProject = (project: ProjectSummary) => operation.run(async () => {
@@ -72,7 +74,7 @@ export default function StudioPage() {
       await studioApi.deleteProject(project.id);
       setProjects(previous => previous.filter(item => item.id !== project.id));
       if (activeProject?.id === project.id) {
-        setActiveProject(null); setMessages([]); setVersions([]); setArtifactHtml(null); setActiveVersion(null);
+        setActiveProject(null); setMessages([]); setVersions([]); setArtifactHtml(null); setPreviewUrl(null); setActiveVersion(null);
       }
     } finally { setStageLabel(''); }
   });
@@ -139,7 +141,7 @@ export default function StudioPage() {
           built = await studioApi.artifact(projectId, { requirement: req, plan_summary: planToText(plan), outline, profile: selectedProfile });
         }
         updateSummary(built.project);
-        setArtifactHtml(built.artifact_html); setActiveVersion(built.version.version_no);
+        setArtifactHtml(built.artifact_html); setPreviewUrl(built.preview_url ?? null); setActiveVersion(built.version.version_no);
         applyDetail(await studioApi.getProject(projectId));
         setMobileTab('preview');
       } finally { setBuilding(false); setRunningPlan(null); setStageLabel(''); }
@@ -158,10 +160,10 @@ export default function StudioPage() {
           restored = true;
           updateSummary(summary); setActiveVersion(summary.current_version ?? null);
           // 已恢复但网页尚未读到，清除旧预览，避免把旧网页标为当前版。
-          setArtifactHtml(null);
+          setArtifactHtml(null); setPreviewUrl(null);
         }
         const detail = await studioApi.getVersion(version.id);
-        setArtifactHtml(detail.artifact_html); setActiveVersion(detail.version_no);
+        setArtifactHtml(detail.artifact_html); setPreviewUrl(null); setActiveVersion(detail.version_no);
         applyDetail(await studioApi.getProject(projectId));
       } catch (failure) {
         if (restored) throw new Error(`已恢复到v${version.version_no}，但读取页面失败；重试仅重新读取。${describeError(failure)}`);
@@ -190,7 +192,7 @@ export default function StudioPage() {
           {messages.length === 0 && !busy && !error ? <div className="flex flex-1 flex-col justify-center px-6"><h2 className="text-[22px] font-semibold text-ink">描述需求，先看计划，<br />确认后查看固定预览。</h2><p className="mt-3 text-sm leading-7 text-ink-soft">本阶段使用预置模拟计划、结构和HTML，不调用真实模型。每次成功构建保存为独立历史版本。</p></div> : <ConversationStream messages={messages} planState={building ? 'running' : hasPendingPlan ? 'pending' : 'done'} runningPlanId={runningPlan} onApprove={approvePlan} onRevise={revisePlan} onRetry={operation.canRetry ? () => void operation.retry() : undefined} busy={busy} error={error} buildStage={stageLabel} onCopy={action => operation.run(action)} />}
           <RequirementComposer value={requirement} onChange={value => { if (!operation.busy) setRequirement(value); }} onSubmit={submitRequirement} busy={busy} disabled={busy} placeholder={activeProject ? '继续输入，例如：增加备注' : '输入需求，例如：记录饮水'} models={models} profile={profile} onProfileChange={value => { if (!operation.busy) setProfile(value); }} suggestions={!messages.length ? SUGGESTIONS : []} hint="先取得模拟计划，确认后保存模拟HTML与版本。" />
         </section>
-        <div className={cn('min-h-0 flex-1 lg:flex', mobileTab === 'preview' ? 'flex' : 'hidden')}><ArtifactPreview html={artifactHtml} title={activeProject?.name || '原型'} busy={busy} stageLabel={stageLabel} versions={versions} activeVersion={activeVersion} onRestore={restoreVersion} restoring={busy} onAction={action => operation.run(action)} /></div>
+        <div className={cn('min-h-0 flex-1 lg:flex', mobileTab === 'preview' ? 'flex' : 'hidden')}><ArtifactPreview html={artifactHtml} previewUrl={previewUrl} title={activeProject?.name || '原型'} busy={busy} stageLabel={stageLabel} versions={versions} activeVersion={activeVersion} onRestore={restoreVersion} restoring={busy} onAction={action => operation.run(action)} /></div>
       </div>
     </main>
   </div>;

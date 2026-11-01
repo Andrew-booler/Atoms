@@ -118,6 +118,16 @@ class BuildResponse(BaseModel):
     message: MessageOut
     outline_title: str
     artifact_html: str
+    preview_url: Optional[str] = None
+
+
+class ExecutionResponse(BaseModel):
+    id: int
+    version_id: int
+    status: str
+    preview_url: str
+    started_at: Optional[datetime] = None
+    expires_at: Optional[datetime] = None
 
 
 class RestoreRequest(BaseModel):

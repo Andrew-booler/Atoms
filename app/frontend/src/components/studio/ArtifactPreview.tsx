@@ -5,6 +5,7 @@ import type { VersionSummary } from '@/lib/studio';
 
 interface ArtifactPreviewProps {
   html: string | null;
+  previewUrl?: string | null;
   title: string;
   busy: boolean;
   stageLabel: string;
@@ -19,6 +20,7 @@ type Viewport = 'desktop' | 'mobile';
 
 export function ArtifactPreview({
   html,
+  previewUrl,
   title,
   busy,
   stageLabel,
@@ -39,6 +41,11 @@ export function ArtifactPreview({
   }, [html]);
 
   const openInNewTab = () => onAction(async () => {
+    if (previewUrl) {
+      const opened = window.open(previewUrl, '_blank');
+      if (!opened) throw new Error("外开页面被浏览器阻止，请允许弹窗后重试。");
+      return;
+    }
     if (!document_) return;
     const blob = new Blob([document_], { type: 'text/html;charset=utf-8' });
     const url = URL.createObjectURL(blob);
@@ -144,7 +151,8 @@ export function ArtifactPreview({
               key={`${activeVersion ?? 0}-${reloadKey}`}
               ref={frameRef}
               title={`${title} 预览`}
-              srcDoc={document_}
+              src={previewUrl ?? undefined}
+              srcDoc={previewUrl ? undefined : document_}
               sandbox="allow-scripts allow-forms allow-modals allow-popups"
               className={cn("h-full w-full border-0 bg-white", busy && "pointer-events-none")}
               tabIndex={busy ? -1 : 0}
@@ -171,7 +179,7 @@ export function ArtifactPreview({
           </>
         ) : (
           <span className="text-[11.5px] text-ink-faint">
-            {html ? '沙箱隔离运行 · 交互可用' : '等待生成产物'}
+            {html ? (previewUrl ? '沙箱隔离运行 · 交互可用' : '本地预览 · 沙箱未启动') : '等待生成产物'}
           </span>
         )}
         {html && (

@@ -3,6 +3,7 @@ import logging
 import os
 import pkgutil
 import traceback
+import asyncio
 from contextlib import asynccontextmanager
 from datetime import datetime
 
@@ -76,13 +77,46 @@ async def lifespan(app: FastAPI):
         # MODULE_STARTUP_END
         pass
 
+    # 沙箱回收器：启动时清理残留容器，后台定期回收过期执行
+    from services.execution import ExecutionService
+    from core.environment import get_env_int
+
+    ExecutionService.cleanup_orphan_containers()
+    cleanup_interval = get_env_int("SANDBOX_CLEANUP_INTERVAL", 60)
+    cleanup_task = asyncio.create_task(_sandbox_cleanup_loop(cleanup_interval))
+
     logger.info("=== Application startup completed successfully ===")
     yield
+    cleanup_task.cancel()
+    try:
+        await cleanup_task
+    except asyncio.CancelledError:
+        pass
     if not get_env_bool("MGX_IGNORE_MODULE_INIT", default=True):
         # MODULE_SHUTDOWN_START
         await close_database()
         # MODULE_SHUTDOWN_END
         pass
+
+
+async def _sandbox_cleanup_loop(interval: int) -> None:
+    """后台定期回收过期沙箱执行。"""
+    import asyncio as _asyncio
+    from core.database import db_manager
+    from services.execution import ExecutionService
+
+    while True:
+        try:
+            await _asyncio.sleep(interval)
+            async with db_manager.session() as session:
+                service = ExecutionService(session)
+                count = await service.cleanup_expired()
+                if count:
+                    logger.info("回收了 %d 个过期沙箱执行", count)
+        except asyncio.CancelledError:
+            break
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("沙箱回收循环异常：%s", exc, exc_info=True)
 
 
 app = FastAPI(
