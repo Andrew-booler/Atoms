@@ -1,4 +1,4 @@
-import { ExternalLink, Loader2, Monitor, RotateCw, Smartphone } from 'lucide-react';
+import { ExternalLink, Loader2, Monitor, Pencil, RotateCw, Smartphone } from 'lucide-react';
 import { useMemo, useRef, useState } from 'react';
 import { cn } from '@/lib/utils';
 import type { VersionSummary } from '@/lib/studio';
@@ -14,6 +14,7 @@ interface ArtifactPreviewProps {
   onRestore: (version: VersionSummary) => void;
   restoring: boolean;
   onAction: (action: () => Promise<void>) => Promise<void>;
+  onEdit: () => void;
 }
 
 type Viewport = 'desktop' | 'mobile';
@@ -29,6 +30,7 @@ export function ArtifactPreview({
   onRestore,
   restoring,
   onAction,
+  onEdit,
 }: ArtifactPreviewProps) {
   const [viewport, setViewport] = useState<Viewport>('desktop');
   const [reloadKey, setReloadKey] = useState(0);
@@ -126,6 +128,15 @@ export function ArtifactPreview({
             className="flex h-7 w-7 items-center justify-center rounded-md text-ink-faint transition-colors hover:bg-paper hover:text-ink disabled:opacity-40"
           >
             <RotateCw className="h-3.5 w-3.5" strokeWidth={1.9} />
+          </button>
+          <button
+            type="button"
+            onClick={() => { if (!busy) onEdit(); }}
+            aria-label="编辑源码"
+            disabled={!html || busy}
+            className="flex h-7 w-7 items-center justify-center rounded-md text-ink-faint transition-colors hover:bg-paper hover:text-ink disabled:opacity-40"
+          >
+            <Pencil className="h-3.5 w-3.5" strokeWidth={1.9} />
           </button>
           <button
             type="button"

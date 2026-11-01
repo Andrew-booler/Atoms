@@ -114,6 +114,11 @@ class ArtifactRequest(BaseModel):
     revision_note: Optional[str] = None
 
 
+class EditArtifactRequest(BaseModel):
+    html: str = Field(min_length=1)
+    note: str = Field(default="", max_length=200)
+
+
 class BuildResponse(BaseModel):
     project: ProjectSummary
     version: VersionSummary

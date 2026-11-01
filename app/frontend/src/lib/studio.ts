@@ -229,6 +229,19 @@ export const studioApi = {
     return res.data as BuildResponse;
   },
 
+  async editArtifact(
+    projectId: number,
+    payload: { html: string; note?: string }
+  ): Promise<BuildResponse> {
+    const res = await client.apiCall.invoke({
+      url: `/api/v1/studio/projects/${projectId}/artifact/edit`,
+      method: 'POST',
+      data: payload,
+      options: { timeout: 600_000 },
+    });
+    return res.data as BuildResponse;
+  },
+
   async getVersion(versionId: number): Promise<VersionDetail> {
     const res = await client.apiCall.invoke({
       url: `/api/v1/studio/versions/${versionId}`,

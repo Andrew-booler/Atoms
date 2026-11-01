@@ -3,6 +3,7 @@ node_modules/
 __pycache__/
 *.py[cod]
 *.log
+dist/
 test-results/
 playwright-report/
 coverage/

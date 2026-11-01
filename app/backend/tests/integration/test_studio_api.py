@@ -362,3 +362,43 @@ async def test_integration_12_revision_creates_new_version(client):
     assert resp.status_code == 404
     detail_after = (await client.get(f"{API}/projects/{pid}")).json()
     assert len(detail_after["versions"]) == 2
+
+
+# 集成-13：artifact/edit —— 直接编辑源码保存为新版本并重跑预览
+async def test_integration_13_edit_artifact_route(client):
+    project = (await client.post(f"{API}/projects", json={"name": "编辑", "description": ""})).json()
+    pid = project["id"]
+    req = "记录饮水"
+    plan_summary = _plan_request_text(studio_output.fixture(req)["plan"])
+    outline = studio_output.fixture(req)["outline"]
+    await client.post(f"{API}/projects/{pid}/plan", json={"requirement": req})
+    first = await client.post(
+        f"{API}/projects/{pid}/artifact",
+        json={"requirement": req, "plan_summary": plan_summary, "outline": outline},
+    )
+    assert first.status_code == 200
+
+    edited_html = "<!DOCTYPE html><html><head><title>改</title></head><body><h1>手改</h1></body></html>"
+    resp = await client.post(
+        f"{API}/projects/{pid}/artifact/edit",
+        json={"html": edited_html, "note": "加了标题"},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["version"]["version_no"] == 2
+    assert data["artifact_html"] == edited_html
+    assert "加了标题" in data["version"]["label"]
+
+    detail = (await client.get(f"{API}/projects/{pid}")).json()
+    assert detail["project"]["current_version"] == 2
+    assert len(detail["versions"]) == 2
+    assert detail["current_artifact"] == edited_html
+
+    # 不完整 HTML -> 422，不产生新版本
+    bad = await client.post(
+        f"{API}/projects/{pid}/artifact/edit",
+        json={"html": "<div>没有 body 也没有闭合</div>", "note": ""},
+    )
+    assert bad.status_code == 422
+    detail_after = (await client.get(f"{API}/projects/{pid}")).json()
+    assert len(detail_after["versions"]) == 2

@@ -14,6 +14,7 @@ from models.studio_versions import Studio_versions
 from schemas.studio import (
     ArtifactRequest,
     BuildResponse,
+    EditArtifactRequest,
     ExecutionResponse,
     MessageCreate,
     MessageOut,
@@ -480,6 +481,90 @@ async def artifact(
         message=_message_out(message),
         outline_title=title,
         artifact_html=artifact_html,
+        preview_url=preview_url,
+    )
+
+
+@router.post("/projects/{project_id}/artifact/edit", response_model=BuildResponse)
+async def edit_artifact(
+    project_id: int,
+    data: EditArtifactRequest,
+    db: AsyncSession = Depends(get_db),
+) -> BuildResponse:
+    """阶段三·编辑：直接修改产物源码，保存为新版本并重跑预览。"""
+    project = await _load_project(db, project_id, SHARED_CONTEXT)
+
+    try:
+        html = validate_artifact_html(data.html)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    base_version = None
+    if project.current_version:
+        base_version = (await db.execute(select(Studio_versions).where(
+            Studio_versions.project_id == project_id,
+            Studio_versions.version_no == project.current_version,
+        ))).scalar_one_or_none()
+
+    current_title = "手动编辑"
+    if base_version and base_version.label:
+        tail = base_version.label.split("·", 1)[-1].strip() if "·" in base_version.label else base_version.label
+        tail = tail.split("（")[0].strip()
+        current_title = tail or current_title
+
+    latest_no = await db.scalar(
+        select(func.max(Studio_versions.version_no)).where(Studio_versions.project_id == project_id)
+    )
+    next_no = int(latest_no or 0) + 1
+
+    note = data.note.strip()
+    label = f"v{next_no} · {current_title}"
+    if note:
+        label += f" · {note}"
+
+    version = Studio_versions(
+        user_id=SHARED_CONTEXT,
+        project_id=project_id,
+        version_no=next_no,
+        label=label,
+        plan_summary=base_version.plan_summary if base_version else "",
+        artifact_html=html,
+    )
+    db.add(version)
+    await db.flush()
+
+    message = await _append_message(
+        db,
+        project_id=project_id,
+        user_id=SHARED_CONTEXT,
+        role="assistant",
+        kind="build",
+        content=f"已手动编辑产物并保存为 {label}。",
+        meta={
+            "version_id": version.id,
+            "version_no": next_no,
+            "title": current_title,
+            "model": "manual-edit",
+        },
+    )
+
+    project.current_version = next_no
+    project.preview_ready = True
+    await _commit(db)
+
+    preview_url = await _try_run_preview(db, html, version.id)
+
+    return BuildResponse(
+        project=await _summary(db, project),
+        version=VersionSummary(
+            id=version.id,
+            version_no=version.version_no,
+            label=version.label,
+            created_at=version.created_at,
+        ),
+        message=_message_out(message),
+        outline_title=current_title,
+        artifact_html=html,
         preview_url=preview_url,
     )
 

@@ -1,6 +1,7 @@
 import { Menu, X } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { ArtifactEditor } from '@/components/studio/ArtifactEditor';
 import { ArtifactPreview } from '@/components/studio/ArtifactPreview';
 import { ConversationStream } from '@/components/studio/ConversationStream';
 import { ProjectRail } from '@/components/studio/ProjectRail';
@@ -30,6 +31,7 @@ export default function StudioPage() {
   const [error, setError] = useState<string | null>(null);
   const [building, setBuilding] = useState(false);
   const [runningPlan, setRunningPlan] = useState<number | null>(null);
+  const [editing, setEditing] = useState(false);
   const [mobileTab, setMobileTab] = useState<'chat' | 'preview'>('chat');
   const [drawer, setDrawer] = useState(false);
   const operation = useMemo(() => new StudioOperation(setBusy, setError, describeError), []);
@@ -45,6 +47,7 @@ export default function StudioPage() {
     setArtifactHtml(detail.current_artifact ?? null);
     setPreviewUrl(null);
     setActiveVersion(detail.project.current_version ?? null);
+    setEditing(false);
   };
 
   useEffect(() => {
@@ -209,6 +212,26 @@ export default function StudioPage() {
       } finally { setBuilding(false); setStageLabel(''); }
     });
   };
+
+  const submitEdit = (html: string, note: string) => {
+    if (operation.busy || !activeProject) return;
+    const projectId = activeProject.id;
+    void operation.run(async () => {
+      setBuilding(true);
+      try {
+        setStageLabel('正在保存编辑并重跑预览…');
+        const built = await studioApi.editArtifact(projectId, { html, note });
+        updateSummary(built.project);
+        setArtifactHtml(built.artifact_html);
+        setPreviewUrl(built.preview_url ?? null);
+        setActiveVersion(built.version.version_no);
+        setEditing(false);
+        applyDetail(await studioApi.getProject(projectId));
+        setMobileTab('preview');
+      } finally { setBuilding(false); setStageLabel(''); }
+    });
+  };
+
   const hasPendingPlan = messages.some(item => item.kind === 'plan' && !item.meta.approved);
   const rail = <ProjectRail projects={projects} activeId={activeProject?.id ?? null} loading={busy && projects.length === 0} busy={busy} activeNav="studio" onSelect={openProject} onCreate={startNewProject} onDelete={removeProject} onNavigate={target => { if (!operation.busy && target !== 'studio') navigate(`/${target}`); }} />;
 
@@ -249,7 +272,13 @@ export default function StudioPage() {
           )}
           <RequirementComposer value={requirement} onChange={value => { if (!operation.busy) setRequirement(value); }} onSubmit={submitRequirement} busy={busy} disabled={busy} placeholder={activeProject ? '继续输入，例如：增加备注' : '输入需求，例如：记录饮水'} models={models} profile={profile} onProfileChange={value => { if (!operation.busy) setProfile(value); }} suggestions={!messages.length ? SUGGESTIONS : []} hint="先取得模拟计划，确认后保存模拟HTML与版本。" />
         </section>
-        <div className={cn('min-h-0 flex-1 lg:flex', mobileTab === 'preview' ? 'flex' : 'hidden')}><ArtifactPreview html={artifactHtml} previewUrl={previewUrl} title={activeProject?.name || '原型'} busy={busy} stageLabel={stageLabel} versions={versions} activeVersion={activeVersion} onRestore={restoreVersion} restoring={busy} onAction={action => operation.run(action)} /></div>
+        <div className={cn('min-h-0 flex-1 lg:flex', mobileTab === 'preview' ? 'flex' : 'hidden')}>
+          {editing && artifactHtml ? (
+            <ArtifactEditor initialHtml={artifactHtml} busy={busy} onSave={submitEdit} onCancel={() => setEditing(false)} />
+          ) : (
+            <ArtifactPreview html={artifactHtml} previewUrl={previewUrl} title={activeProject?.name || '原型'} busy={busy} stageLabel={stageLabel} versions={versions} activeVersion={activeVersion} onRestore={restoreVersion} restoring={busy} onAction={action => operation.run(action)} onEdit={() => setEditing(true)} />
+          )}
+        </div>
       </div>
     </main>
   </div>;

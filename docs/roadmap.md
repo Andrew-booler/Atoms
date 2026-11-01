@@ -13,7 +13,7 @@
 |---|---|---|---|---|---|---|
 | 1 | 执行与隔离层 | 把 Provider 产出的 HTML 放进 Docker 沙箱实际运行，返回 `preview_url` 替代 iframe srcDoc。建立端口分配、容器生命周期、超时回收的执行服务。 | 13 | 2-3 周 | 无 | ✅ 已完成 |
 | 2 | 多轮迭代回路 | 让用户基于已有产物提修改意见，系统把当前 artifact_html 连同意见一起发给 Provider 生成新版本。建立"看产物→提意见→出新版本"的迭代闭环。 | 5 | 约 1 周 | Phase 1 | ✅ 已完成 |
-| 3 | 代码编辑器 | 前端嵌入 Monaco/CodeMirror，允许直接编辑 artifact 源码，保存后重跑预览。支持文件树、编辑会话、Diff 对比。 | 8 | 1-2 周 | Phase 1 | 方向已确认 |
+| 3 | 代码编辑器 | 前端嵌入 Monaco/CodeMirror，允许直接编辑 artifact 源码，保存后重跑预览。支持文件树、编辑会话、Diff 对比。 | 8 | 1-2 周 | Phase 1 | ✅ 已完成 |
 | 4 | 真实 AI Provider | 替换 MockOutputProvider，接入真实大模型生成 Plan/Outline/HTML。保持响应契约不变，确保上层流程不受影响。 | 8 | 1-2 周 | Phase 2 或 Phase 3 | 方向已确认 |
 | 5 | 多 Agent 协作 | 引入角色体系（Team Leader/PM/Architect/Engineer 等）和 Team Mode，实现 Agent 间交接、提问卡、计划卡审批。把单轮生成升级为团队协作。 | 21 | 3-5 周 | Phase 4 | 方向已确认 |
 | 6 | 工具与集成框架 | 建立工具注册表，支持内置工具、MCP、外部连接器三种来源，Agent 可发现并调用工具。定义统一的执行与权限模型。 | 21 | 3-5 周 | Phase 4（或 Phase 5） | 方向已确认 |
@@ -245,9 +245,10 @@ Phase 9  ── 成本控制 + 备份恢复
 - 编辑后保存为新版本（或覆盖当前版本，待定），并重新启动沙箱预览。
 - 与 Phase 2 的关系：多轮回路是"用自然语言改"，编辑器是"用代码改"，两者可并存。
 - 参考 Atoms：编辑器支持文件树、Diff 对比、编辑会话（Submit all / Discard all）、把文件作为上下文加入对话（`#` 引用）、下载项目为 ZIP。
+- **状态：已完成。** 选型 **CodeMirror 6**（`@uiw/react-codemirror` + `@codemirror/lang-html`，轻量可定制）。语义采用"保存为新版本"：在预览区头部新增"编辑源码"入口，切换到内嵌 CodeMirror 编辑器，修改后可附备注，"保存并预览"调用新增路由 `POST /projects/{project_id}/artifact/edit`（`EditArtifactRequest { html, note }`），后端 `validate_artifact_html` 校验后以"当前最大 version_no +1"落库为新版本，label 沿用当前版本标题并可追加备注，随后复用沙箱执行服务重跑预览并更新 `current_version`。文件树 / Diff / 编辑会话等进阶能力留待后续 Phase 扩展。
 - **决策点（Phase 3 启动时定）**：
-  - 编辑器选型：Monaco（VS Code 内核，功能全但体积大）vs CodeMirror（轻量、可定制）。
-  - 编辑保存语义：保存为新版本（保留历史）vs 覆盖当前版本（Atoms 是编辑会话 Submit all 后应用）。
+  - 编辑器选型：Monaco（VS Code 内核，功能全但体积大）vs CodeMirror（轻量、可定制）——已定 **CodeMirror**。
+  - 编辑保存语义：保存为新版本（保留历史）vs 覆盖当前版本（Atoms 是编辑会话 Submit all 后应用）——已定 **保存为新版本**。
 
 ### Phase 4：真实 AI Provider
 - **当前 mock 已增强为示例驱动：** `services/studio_examples.py` 提供 4 个完整可交互示范网页（饮水追踪器 / 任务看板 / 记账本 / 读书笔记库）与一个通用演示页；`MockOutputProvider` 按需求命中示例返回对应三件套（plan / outline / html），未命中返回通用页。接真实 Provider 后，若用户输入与示例文本相同，应**短路返回对应示范网页**，不调用真实模型，保证首体验稳定。
