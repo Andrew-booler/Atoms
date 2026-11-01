@@ -26,13 +26,37 @@ async function confirm(page: Page) { await page.getByRole('button', { name: '确
 test.beforeEach(async ({ request }) => { await call(request, '/__test/reset', {}); });
 
 test('导航-集成-01：初始化共享入口无登录且请求依次完成', async ({ page }) => {
-  const events: string[] = []; page.on('request', r => { if (r.url().includes(api)) events.push(`start:${new URL(r.url()).pathname}`); }); page.on('requestfinished', r => { if (r.url().includes(api)) events.push(`end:${new URL(r.url()).pathname}`); });
-  await open(page); await expect(page.getByText('共享数据 · 预置模拟输出')).toBeVisible(); expect(events.slice(0, 4)).toEqual([`start:${api}/projects`, `end:${api}/projects`, `start:${api}/models`, `end:${api}/models`]); expect(await page.getByRole('button', { name: /登录/ }).count()).toBe(0);
+  const events: { type: 'start' | 'end'; path: string; at: number }[] = [];
+  const record = (type: 'start' | 'end') => (request: { url: () => string }) => {
+    const url = request.url();
+    if (url.includes(api)) events.push({ type, path: new URL(url).pathname, at: Date.now() });
+  };
+  page.on('request', record('start'));
+  page.on('requestfinished', record('end'));
+  // 延迟列表响应：并发实现会让配置请求立刻发出，串行实现必须等列表响应返回后才发。
+  await page.route(`**${api}/projects`, async route => { await new Promise(resolve => setTimeout(resolve, 300)); await route.continue(); });
+  await open(page);
+  await expect(page.getByText('共享数据 · 预置模拟输出')).toBeVisible();
+  const starts = events.filter(event => event.type === 'start');
+  expect(starts.map(event => event.path)).toEqual([`${api}/projects`, `${api}/models`]);
+  expect(starts[1].at - starts[0].at).toBeGreaterThanOrEqual(250);
+  await expect.poll(() => events.filter(event => event.type === 'end').length).toBe(2);
+  expect(await page.getByRole('button', { name: /登录/ }).count()).toBe(0);
 });
 test('导航-集成-02：部署占位不发布', async ({ page }) => { await open(page); await page.getByRole('button', { name: '部署与分享', exact: true }).click(); await expect(page.getByText('尚未构建', { exact: true })).toBeVisible(); await expect(page).toHaveURL(/deploy/); });
 test('导航-集成-03：Cloud占位不管理数据', async ({ page }) => { await page.goto('/cloud'); await expect(page.getByText('尚未构建', { exact: true })).toBeVisible(); });
 test('导航-集成-04：占位返回重新读取列表', async ({ page, request }) => { await project(request); await page.goto('/deploy'); await page.getByRole('button', { name: '返回工作台' }).click(); await expect(page.getByText('演示项目', { exact: true })).toBeVisible(); });
-test('导航-集成-05：窄屏项目入口与区域切换', async ({ page, request }) => { await project(request); await page.setViewportSize({ width: 375, height: 812 }); await open(page); await page.getByRole('button', { name: '打开项目列表' }).click(); await expect(page.getByText('演示项目', { exact: true })).toBeVisible(); await page.getByRole('button', { name: '关闭项目列表' }).click(); await page.getByRole('button', { name: '预览', exact: true }).click(); await expect(page.getByRole('region', { name: '应用预览' })).toBeVisible(); });
+test('导航-集成-05：窄屏项目入口与区域切换', async ({ page, request }) => {
+  await project(request); await page.setViewportSize({ width: 375, height: 812 }); await open(page);
+  await page.getByRole('button', { name: '打开项目列表' }).click();
+  // 桌面侧栏与抽屉各有一份项目项，这里只断言抽屉里那份可见。
+  const drawerItems = page.locator('button:visible').filter({ hasText: '演示项目' });
+  await expect(drawerItems).toHaveCount(1);
+  await expect(drawerItems).toBeVisible();
+  await page.getByRole('button', { name: '关闭项目列表' }).click();
+  await page.getByRole('button', { name: '预览', exact: true }).click();
+  await expect(page.getByRole('region', { name: '应用预览' })).toBeVisible();
+});
 
 test('项目-集成-01：新建工作区保留草稿且首次提交创建真实项目', async ({ page, request }) => { await open(page); await page.getByRole('textbox').fill('记录饮水'); await page.getByRole('button', { name: '新建项目' }).click(); await expect(page.getByRole('textbox')).toHaveValue('记录饮水'); expect((await call(request, `${api}/projects`)).length).toBe(0); await submit(page); const list = await call(request, `${api}/projects`); expect(list).toHaveLength(1); const detail = await call(request, `${api}/projects/${list[0].id}`); expect(detail.messages).toHaveLength(2); expect(detail.versions).toHaveLength(0); });
 test('项目-集成-02：不同客户端读取同一项目与版本', async ({ request, playwright }) => { const p = await project(request); await build(request, p.id); const other = await playwright.request.newContext(); const detail = await call(other, `${api}/projects/${p.id}`); expect(detail.project.current_version).toBe(1); expect(detail.current_artifact).toContain('模拟第一版'); await other.dispose(); });

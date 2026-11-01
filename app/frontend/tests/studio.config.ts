@@ -29,8 +29,9 @@ export default defineConfig({
       command: `node "${path.join(frontendDir, 'node_modules', 'vite', 'bin', 'vite.js')}"`,
       url: 'http://127.0.0.1:3101',
       reuseExistingServer: false,
-      timeout: 60000,
       env: { VITE_PORT: '3101', BACKEND_PORT: '8101' },
+      // Vite 冷启动（首次依赖预打包）可能超过默认 60 秒，留足余量避免误判为启动失败。
+      timeout: 180000,
     },
   ],
 });
