@@ -1,0 +1,29 @@
+# Python
+app/backend/.venv/
+**/__pycache__/
+**/*.py[cod]
+*.log
+
+# Node
+app/frontend/node_modules/
+app/frontend/dist/
+**/node_modules/
+
+# Tests / artifacts
+**/.pytest_cache/
+**/test-results/
+**/playwright-report/
+**/coverage/
+**/htmlcov/
+.coverage
+
+# VCS / IDE
+.git/
+.gitignore
+.vscode/
+.trae/
+
+# Local env / secrets
+.env
+.env.*
+*.env

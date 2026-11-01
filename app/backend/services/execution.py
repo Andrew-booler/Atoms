@@ -336,6 +336,8 @@ class ExecutionService:
     @staticmethod
     def cleanup_orphan_containers() -> None:
         """停止并删除所有 atoms-sandbox- 前缀的残留容器。"""
+        if not ExecutionService.is_docker_available():
+            return
         ps = subprocess.run(
             ["docker", "ps", "-aq", "--filter", f"name={CONTAINER_PREFIX}"],
             capture_output=True, text=True, timeout=30,

@@ -11,7 +11,7 @@ from core.config import settings
 from core.environment import get_env_bool
 from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.routing import APIRouter
 from utils.logging_utils import cleanup_old_log_files
 
@@ -82,7 +82,7 @@ async def lifespan(app: FastAPI):
     from core.environment import get_env_int
 
     ExecutionService.cleanup_orphan_containers()
-    cleanup_interval = get_env_int("SANDBOX_CLEANUP_INTERVAL", 60)
+    cleanup_interval = get_env_int("SANDBOX_CLEANUP_INTERVAL", default=60)
     cleanup_task = asyncio.create_task(_sandbox_cleanup_loop(cleanup_interval))
 
     logger.info("=== Application startup completed successfully ===")
@@ -232,12 +232,40 @@ async def general_exception_handler(request: Request, exc: Exception):
 
 @app.get("/")
 def root():
+    static_index = os.environ.get("STATIC_DIR", "").strip()
+    if static_index:
+        index = os.path.join(static_index, "index.html")
+        if os.path.isfile(index):
+            return FileResponse(index)
     return {"message": "FastAPI Modular Template is running"}
 
 
 @app.get("/health")
 def health_check():
     return {"status": "healthy"}
+
+
+# 可选静态托管：设置 STATIC_DIR 指向前端构建产物目录后启用（同源单镜像部署）。
+_STATIC_DIR = os.environ.get("STATIC_DIR", "").strip()
+if _STATIC_DIR and os.path.isdir(_STATIC_DIR):
+    from fastapi.staticfiles import StaticFiles
+
+    _assets_dir = os.path.join(_STATIC_DIR, "assets")
+    if os.path.isdir(_assets_dir):
+        app.mount("/assets", StaticFiles(directory=_assets_dir), name="assets")
+
+    @app.get("/{full_path:path}", include_in_schema=False)
+    async def spa_fallback(full_path: str):
+        # 保持 API/健康检查的 404 语义，不被 SPA 兜底吞掉
+        if full_path.startswith(("api/", "health")):
+            raise HTTPException(status_code=404, detail="Not Found")
+        target = os.path.join(_STATIC_DIR, full_path) if full_path else ""
+        if full_path and os.path.isfile(target):
+            return FileResponse(target)
+        index = os.path.join(_STATIC_DIR, "index.html")
+        if os.path.isfile(index):
+            return FileResponse(index)
+        raise HTTPException(status_code=404, detail="Not Found")
 
 
 def run_in_debug_mode(app: FastAPI):

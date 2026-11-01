@@ -1,0 +1,7 @@
+{
+  "data-root": "/data/docker",
+  "iptables": true,
+  "ip6tables": false,
+  "mtu": 1400,
+  "log-level": "info"
+}
