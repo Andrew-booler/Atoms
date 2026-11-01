@@ -41,6 +41,8 @@ class ControlledProvider(studio_output.MockOutputProvider):
                 await asyncio.sleep(1)
             elif state["mode"] == "invalid":
                 return True
+            elif state["mode"] == "crash":
+                raise RuntimeError("受控非HTTP异常")
             else:
                 raise HTTPException(502, "受控模拟阶段失败")
         return False

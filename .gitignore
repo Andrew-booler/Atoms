@@ -6,6 +6,8 @@ __pycache__/
 test-results/
 playwright-report/
 coverage/
+htmlcov/
+.coverage
 **/tests/results.json
 **/tests/tests/
 .pytest_cache/

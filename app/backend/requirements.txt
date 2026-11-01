@@ -9,6 +9,7 @@ python-multipart>=0.0.6  # Required for FastAPI Form data handling
 # Development and testing
 pytest>=8.4.1
 pytest-asyncio>=1.1.0
+pytest-cov
 httpx>=0.27.0
 
 # ASW Lambda

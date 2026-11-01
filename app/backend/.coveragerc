@@ -1,0 +1,16 @@
+[run]
+branch = True
+omit =
+    */mock_data.py
+    */studio_ai.py
+    */config.py
+    */enums.py
+    */mask_crypto.py
+    */telemetry/*
+    */__init__.py
+
+[report]
+exclude_lines =
+    pragma: no cover
+    if TYPE_CHECKING:
+    if __name__ == .__main__.:

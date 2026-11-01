@@ -26,10 +26,10 @@ def fixture(requirement: str) -> dict:
     }
 
 
-class OutputProvider(Protocol):
-    async def plan(self, requirement: str, **kwargs) -> dict: ...
-    async def outline(self, requirement: str, plan: dict, **kwargs) -> dict: ...
-    async def artifact(self, requirement: str, plan: dict, outline: dict, **kwargs) -> str: ...
+class OutputProvider(Protocol):  # pragma: no cover - 类型协议，无运行时逻辑
+    async def plan(self, requirement: str, **kwargs) -> dict: ...  # pragma: no cover
+    async def outline(self, requirement: str, plan: dict, **kwargs) -> dict: ...  # pragma: no cover
+    async def artifact(self, requirement: str, plan: dict, outline: dict, **kwargs) -> str: ...  # pragma: no cover
 
 
 class MockOutputProvider:
