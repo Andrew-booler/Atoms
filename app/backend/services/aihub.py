@@ -9,6 +9,8 @@ import base64
 import io
 import json
 import logging
+import os
+import random
 from pathlib import Path
 from typing import AsyncGenerator, Optional, TYPE_CHECKING
 
@@ -81,6 +83,29 @@ VOICE_MAP: dict[tuple[str, str], str] = {
 DEFAULT_VOICE = {"male": "Ethan", "female": "Cherry"}
 
 
+# ==== AI 调用韧性配置（可用环境变量覆盖，避免硬编码） ====
+# 并发上限：限制同时进行的模型请求数，从源头避免瞬时洪峰触发上游并发限流（429）。
+AI_MAX_CONCURRENCY = int(os.environ.get("APP_AI_MAX_CONCURRENCY", "2"))
+# 可重试错误（429/5xx/超时/连接错误）的最大重试次数。
+AI_MAX_RETRIES = int(os.environ.get("APP_AI_MAX_RETRIES", "4"))
+# 指数退避的基座秒数与封顶秒数。
+AI_RETRY_BASE_SECONDS = float(os.environ.get("APP_AI_RETRY_BASE", "1.0"))
+AI_RETRY_MAX_SECONDS = float(os.environ.get("APP_AI_RETRY_MAX", "30.0"))
+
+# 服务级并发信号量：AIHubService 每次调用都会新建实例，信号量须模块级共享，
+# 才能在多请求/多实例之间真正限流。
+_ai_semaphore = asyncio.Semaphore(AI_MAX_CONCURRENCY)
+
+
+def _backoff_seconds(attempt: int) -> float:
+    """指数退避 + 全抖动，避免固定间隔重试造成惊群。
+
+    等待时长在 (0, min(base * 2^attempt, cap)] 内均匀随机。
+    """
+    cap = min(AI_RETRY_BASE_SECONDS * (2 ** attempt), AI_RETRY_MAX_SECONDS)
+    return random.uniform(0, cap)
+
+
 class AIHubService:
     """AI Hub service class that wraps AI SDK calls."""
 
@@ -108,6 +133,42 @@ class AIHubService:
             content = [item.model_dump() if hasattr(item, "model_dump") else item for item in content]
         return {"role": msg.role, "content": content}
 
+    async def _create_chat_completion(self, request: GenTxtRequest, *, stream: bool):
+        """发起 chat.completions.create，带并发限流与指数退避重试。
+
+        429 限流、5xx、超时、连接错误均按指数退避 + 抖动重试；所有请求经模块级
+        信号量限流，从源头避免瞬时洪峰触发上游并发限流。
+        """
+        from openai import APIConnectionError, APITimeoutError, InternalServerError, RateLimitError
+
+        retryable = (RateLimitError, InternalServerError, APITimeoutError, APIConnectionError)
+        client = self._require_ai_client()
+        messages = [self._convert_message(msg) for msg in request.messages]
+
+        async with _ai_semaphore:
+            attempt = 0
+            while True:
+                try:
+                    return await observe_external_http(
+                        client.chat.completions.create(
+                            model=request.model,
+                            messages=messages,
+                            temperature=request.temperature,
+                            max_tokens=request.max_tokens,
+                            stream=stream,
+                        )
+                    )
+                except retryable as exc:
+                    if attempt >= AI_MAX_RETRIES:
+                        raise
+                    delay = _backoff_seconds(attempt)
+                    logger.warning(
+                        "AI 调用遇到可重试错误 %s，第 %d/%d 次退避重试，等待 %.2f 秒",
+                        type(exc).__name__, attempt + 1, AI_MAX_RETRIES, delay,
+                    )
+                    await asyncio.sleep(delay)
+                    attempt += 1
+
     async def gentxt(self, request: GenTxtRequest) -> GenTxtResponse:
         """
         Generate Text API (non-streaming), supports text and image input.
@@ -119,18 +180,7 @@ class AIHubService:
             Txt2TxtResponse: generated text response.
         """
         try:
-            client = self._require_ai_client()
-            messages = [self._convert_message(msg) for msg in request.messages]
-
-            response = await observe_external_http(
-                client.chat.completions.create(
-                    model=request.model,
-                    messages=messages,
-                    temperature=request.temperature,
-                    max_tokens=request.max_tokens,
-                    stream=False,
-                )
-            )
+            response = await self._create_chat_completion(request, stream=False)
 
             content = response.choices[0].message.content or ""
             usage = None
@@ -162,18 +212,7 @@ class AIHubService:
             str: Generated text content chunk (plain text, not JSON).
         """
         try:
-            client = self._require_ai_client()
-            messages = [self._convert_message(msg) for msg in request.messages]
-
-            stream = await observe_external_http(
-                client.chat.completions.create(
-                    model=request.model,
-                    messages=messages,
-                    temperature=request.temperature,
-                    max_tokens=request.max_tokens,
-                    stream=True,
-                )
-            )
+            stream = await self._create_chat_completion(request, stream=True)
 
             async for chunk in stream:
                 if chunk.choices and chunk.choices[0].delta.content:

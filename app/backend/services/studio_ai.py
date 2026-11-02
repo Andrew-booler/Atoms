@@ -21,19 +21,19 @@ DEFAULT_PROFILE = "balanced"
 
 MODEL_PROFILES: Dict[str, Dict[str, str]] = {
     "balanced": {
-        "id": "gpt-5.5",
+        "id": "glm-4.7-flash",
         "label": "Balanced",
-        "hint": "通用的高质量文本模型，速度与效果均衡",
+        "hint": "GLM-4.7-Flash，速度与效果均衡（免费）",
     },
     "fast": {
-        "id": "deepseek-v4-flash",
+        "id": "glm-4.7-flash",
         "label": "Fast",
-        "hint": "速度最快、成本最低，适合小步快速迭代",
+        "hint": "GLM-4.7-Flash，轻量快速（免费）",
     },
     "quality": {
-        "id": "claude-opus-5",
+        "id": "glm-4.7-flash",
         "label": "Quality",
-        "hint": "长上下文与复杂界面还原能力更强",
+        "hint": "GLM-4.7-Flash，长上下文还原（免费）",
     },
 }
 

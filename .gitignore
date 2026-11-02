@@ -12,3 +12,5 @@ htmlcov/
 **/tests/results.json
 **/tests/tests/
 .pytest_cache/
+.env
+.env.local
