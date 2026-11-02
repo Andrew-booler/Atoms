@@ -5,6 +5,7 @@
 切换模型只需修改 MODEL_PROFILES 中的 id。
 """
 
+import asyncio
 import json
 import logging
 import re
@@ -13,7 +14,7 @@ from typing import Any, Dict, List, Optional
 from fastapi import HTTPException
 
 from schemas.aihub import ChatMessage, GenTxtRequest
-from services.aihub import AIHubService
+from services.aihub import AIHubService, AI_MAX_RETRIES, _backoff_seconds
 
 logger = logging.getLogger(__name__)
 
@@ -123,8 +124,19 @@ async def _gentxt(
         max_tokens=max_tokens,
         temperature=temperature,
     )
-    response = await service.gentxt(request)
-    return (response.content or "").strip()
+    # 免费模型偶发返回空响应，视为瞬时失败并按指数退避重试。
+    for attempt in range(AI_MAX_RETRIES + 1):
+        response = await service.gentxt(request)
+        content = (response.content or "").strip()
+        if content:
+            return content
+        delay = _backoff_seconds(attempt)
+        logger.warning(
+            "AI 返回空响应，第 %d/%d 次退避重试，等待 %.2f 秒",
+            attempt + 1, AI_MAX_RETRIES, delay,
+        )
+        await asyncio.sleep(delay)
+    return ""
 
 
 async def _gentxt_json(
@@ -140,6 +152,8 @@ async def _gentxt_json(
         system, user, model=model, max_tokens=max_tokens, temperature=temperature
     )
     payload_text = _extract_json_block(raw)
+    if not payload_text.strip():
+        raise HTTPException(status_code=502, detail="AI 返回空响应，请稍后重试")
 
     payload: Optional[Dict[str, Any]] = None
     try:
