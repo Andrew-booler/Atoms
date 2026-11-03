@@ -54,6 +54,7 @@ from schemas.studio import (
 from services import ai_usage
 from services import build_events as build_log
 from services import studio_output as studio_ai
+from services import user_ai_config
 from services.aihub import AllProvidersFailedError
 from services.execution import ExecutionService
 from services.studio_validation import (
@@ -99,12 +100,15 @@ async def _commit(db: AsyncSession):
 
 def _provider_details(exc: AllProvidersFailedError) -> Dict[str, Any]:
     """把供应商失败摘要放入 details：保留 provider/model/reason，不含密钥。"""
-    return {
+    details: Dict[str, Any] = {
         "providers": [
             {"provider": failure.provider, "model": failure.model, "reason": failure.reason}
             for failure in exc.failures
         ]
     }
+    if any(failure.provider == user_ai_config.USER_PROVIDER_NAME for failure in exc.failures):
+        details["fallback_message"] = "自选接入失败，已尝试回退系统默认供应商。"
+    return details
 
 
 def _parse_meta(raw: Optional[str]) -> Dict[str, Any]:
@@ -282,6 +286,7 @@ class _BuildStage:
 
     async def __aexit__(self, exc_type, exc, tb) -> bool:
         usage = ai_usage.finish_stage(self._usage_token) if self._usage_token is not None else None
+        fallbacks = ai_usage.fallbacks()
         duration_ms = int((time.monotonic() - self._started_at) * 1000)
         if exc is None:
             await _emit_event(
@@ -289,16 +294,18 @@ class _BuildStage:
                 build_log.STAGE_FINISHED,
                 stage=self.stage,
                 message=self.finish_message,
-                data={"duration_ms": duration_ms, "usage": usage},
+                data={"duration_ms": duration_ms, "usage": usage, "fallbacks": fallbacks},
             )
             return False
 
         if isinstance(exc, AppError):
             code = exc.code
-            details = exc.details
+            details = exc.details or {}
         else:  # 未转换的异常：只暴露错误类型，不泄露堆栈
             code = error_codes.INTERNAL_ERROR
             details = {"reason": type(exc).__name__}
+        if fallbacks:
+            details = {**details, "fallbacks": fallbacks}
         await _emit_event(
             self.ctx,
             build_log.ERROR,
@@ -525,20 +532,21 @@ async def plan(
     await _commit(db)
 
     async with _BuildStage(ctx, "plan", *_STAGE_TEXT["plan"]):
-        try:
-            raw_plan = await studio_ai.get_provider().plan(
-                data.requirement, project_name=project_name, profile=data.profile
-            )
-        except AppError:
-            raise
-        except AllProvidersFailedError as exc:
-            logger.error("Studio plan failed: 全部供应商失败")
-            raise ProviderError(
-                error_codes.STUDIO_PLAN_FAILED, details=_provider_details(exc)
-            ) from exc
-        except Exception as exc:  # noqa: BLE001
-            logger.error("Studio plan failed: %s", type(exc).__name__)
-            raise ProviderError(error_codes.STUDIO_PLAN_FAILED) from exc
+        async with user_ai_config.activate_user_provider(db, current_user.id):
+            try:
+                raw_plan = await studio_ai.get_provider().plan(
+                    data.requirement, project_name=project_name, profile=data.profile
+                )
+            except AppError:
+                raise
+            except AllProvidersFailedError as exc:
+                logger.error("Studio plan failed: 全部供应商失败")
+                raise ProviderError(
+                    error_codes.STUDIO_PLAN_FAILED, details=_provider_details(exc)
+                ) from exc
+            except Exception as exc:  # noqa: BLE001
+                logger.error("Studio plan failed: %s", type(exc).__name__)
+                raise ProviderError(error_codes.STUDIO_PLAN_FAILED) from exc
 
         try:
             payload = validate_plan_payload(raw_plan)
@@ -600,22 +608,23 @@ async def outline(
     await _commit(db)
 
     async with _BuildStage(ctx, "outline", *_STAGE_TEXT["outline"]):
-        try:
-            raw = await studio_ai.get_provider().outline(
-                data.requirement,
-                {"summary": data.plan_summary, "steps": []},
-                profile=data.profile,
-            )
-        except AppError:
-            raise
-        except AllProvidersFailedError as exc:
-            logger.error("Studio outline failed: 全部供应商失败")
-            raise ProviderError(
-                error_codes.STUDIO_OUTLINE_FAILED, details=_provider_details(exc)
-            ) from exc
-        except Exception as exc:  # noqa: BLE001
-            logger.error("Studio outline failed: %s", type(exc).__name__)
-            raise ProviderError(error_codes.STUDIO_OUTLINE_FAILED) from exc
+        async with user_ai_config.activate_user_provider(db, current_user.id):
+            try:
+                raw = await studio_ai.get_provider().outline(
+                    data.requirement,
+                    {"summary": data.plan_summary, "steps": []},
+                    profile=data.profile,
+                )
+            except AppError:
+                raise
+            except AllProvidersFailedError as exc:
+                logger.error("Studio outline failed: 全部供应商失败")
+                raise ProviderError(
+                    error_codes.STUDIO_OUTLINE_FAILED, details=_provider_details(exc)
+                ) from exc
+            except Exception as exc:  # noqa: BLE001
+                logger.error("Studio outline failed: %s", type(exc).__name__)
+                raise ProviderError(error_codes.STUDIO_OUTLINE_FAILED) from exc
 
         try:
             payload = validate_outline_payload(raw)
@@ -676,25 +685,26 @@ async def artifact(
     replay_response: Optional[BuildResponse] = None
 
     async with _BuildStage(ctx, "artifact", *_STAGE_TEXT["artifact"]):
-        try:
-            artifact_html = await studio_ai.get_provider().artifact(
-                data.requirement,
-                {"summary": data.plan_summary, "steps": []},
-                data.outline.model_dump(),
-                profile=data.profile,
-                context=base_version.artifact_html if base_version else None,
-                base_version_id=data.base_version_id,
-            )
-        except AppError:
-            raise
-        except AllProvidersFailedError as exc:
-            logger.error("Studio artifact failed: 全部供应商失败")
-            raise ProviderError(
-                error_codes.STUDIO_ARTIFACT_FAILED, details=_provider_details(exc)
-            ) from exc
-        except Exception as exc:  # noqa: BLE001
-            logger.error("Studio artifact failed: %s", type(exc).__name__)
-            raise ProviderError(error_codes.STUDIO_ARTIFACT_FAILED) from exc
+        async with user_ai_config.activate_user_provider(db, current_user.id):
+            try:
+                artifact_html = await studio_ai.get_provider().artifact(
+                    data.requirement,
+                    {"summary": data.plan_summary, "steps": []},
+                    data.outline.model_dump(),
+                    profile=data.profile,
+                    context=base_version.artifact_html if base_version else None,
+                    base_version_id=data.base_version_id,
+                )
+            except AppError:
+                raise
+            except AllProvidersFailedError as exc:
+                logger.error("Studio artifact failed: 全部供应商失败")
+                raise ProviderError(
+                    error_codes.STUDIO_ARTIFACT_FAILED, details=_provider_details(exc)
+                ) from exc
+            except Exception as exc:  # noqa: BLE001
+                logger.error("Studio artifact failed: %s", type(exc).__name__)
+                raise ProviderError(error_codes.STUDIO_ARTIFACT_FAILED) from exc
 
         try:
             artifact_html = validate_artifact_html(artifact_html)

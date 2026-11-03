@@ -84,11 +84,14 @@ _provider: Optional[OutputProvider] = None
 
 
 def get_provider() -> OutputProvider:
-    """返回当前 Provider：AI 环境变量齐全用真实模型，否则用示例 mock。"""
-    global _provider
-    if _provider is None:
-        _provider = RealOutputProvider() if _ai_enabled() else MockOutputProvider()
-    return _provider
+    """返回当前 Provider：注入优先；否则按当前请求是否配置了 AI 动态选择。
+
+    用户自选接入通过 ContextVar 生效，因此不能把 Mock 实例永久缓存，
+    否则配置后同一进程内仍会继续用模拟输出。
+    """
+    if _provider is not None:
+        return _provider
+    return RealOutputProvider() if _ai_enabled() else MockOutputProvider()
 
 
 def resolve_model(profile=None) -> str:

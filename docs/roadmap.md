@@ -23,7 +23,7 @@
 | 10 | 构建终端与实时反馈 | 预览区旁实时展示构建 stdout/stderr、文件创建、错误日志，让用户看到 Agent 实际在做什么。 | 5 | 约 1 周 | Phase 1 | 已完成（2026-11-04，仅本地验证；临时提前于 Phase 5） |
 | 11 | 知识库与工作区上下文 | 工作区级持久 system prompt + 知识库（RAG）+ 文件引用，所有对话继承上下文，提升生成质量与一致性。 | 13 | 2-3 周 | Phase 4 | 方向已确认 |
 | 12 | 消息队列与任务编排 | Agent 工作中用户可排队后续指令，支持重排、编辑、暂停/恢复，不打断当前任务。 | 5 | 约 1 周 | Phase 5（或 Phase 4） | 方向已确认 |
-| 13 | 用户自选 AI API（能力扩展） | 用户/工作区级配置自己的 base_url + key + model，预设主流 OpenAI 兼容厂商；密钥加密存储、不落日志。 | 8 | 1-2 周 | Phase 4 | 方向已确认 |
+| 13 | 用户自选 AI API（能力扩展） | 用户/工作区级配置自己的 base_url + key + model，预设主流 OpenAI 兼容厂商；密钥加密存储、不落日志。 | 8 | 1-2 周 | Phase 4 | 已完成（2026-11-04，仅本地验证；临时提前于 Phase 11） |
 | 14 | 动态后端 / 前后端分离（能力扩展） | 支持生成带后端逻辑的应用（Node/FastAPI），产物有 API + 状态；沙箱扩展为可运行进程 + 出站隔离。 | 21 | 3-5 周 | Phase 1（沙箱扩展） | 方向已确认 |
 | 15 | 多语言 / 多文件项目（能力扩展） | 单文件 HTML → 多文件项目 + 构建流水线（React/Vue 等），含文件树、依赖安装、构建、产物托管闭环。 | 34 | 5 周+ | Phase 1 + Phase 14 | 方向已确认 |
 | 16 | 统一业务异常体系（横切加固） | 建立业务异常基类与分级、错误码-消息映射、全局异常处理器；对外统一返回 `ErrorResponse{code, message, details?}` 而非裸状态码；日志脱敏。牵动 API 错误响应契约与现有测试。 | 5 | 约 1 周 | 无（建议 P0 前置，可早于 Phase 5） | **已完成（2026-11-04）** |
@@ -120,7 +120,7 @@
 | 13 | 构建终端与实时反馈（stdout/stderr、文件创建、错误日志） | Phase 10 | 已完成（2026-11-04，临时提前） | Phase 1 | 只依赖沙箱与任务执行；已完成 SSE 事件流、构建终端面板与刷新回看，Phase 5 仍为下一轮首位 |
 | 14 | 知识库与工作区上下文（持久 prompt + RAG + 文件引用） | Phase 11 | Phase 4 之后，可与 Phase 5/6 并行 | Phase 4 | 依赖真实 AI；提升生成质量与跨对话一致性 |
 | 15 | 消息队列与任务编排（排队、重排、暂停/恢复） | Phase 12 | Phase 5 稳定后 | Phase 5（或 Phase 4） | 需多 Agent/长任务才有排队价值；过早做缺少真实队列场景 |
-| 16 | 用户自选 AI API（工作区级 base_url + key + model） | Phase 13 | 可与主线并行 | Phase 4 | 相对独立，不阻塞对外关键路径；可在 Phase 16/17 后随时插入 |
+| 16 | 用户自选 AI API（工作区级 base_url + key + model） | Phase 13 | 已完成（2026-11-04，临时提前） | Phase 4 | 与供应商层相邻、体量可控；已完成加密存储、掩码、连接测试、优先级与回退、设置页区块 |
 | 17 | 动态后端 / 前后端分离（Node/FastAPI 产物 + 出站隔离） | Phase 14 | Phase 7 之后或与能力扩展并行 | Phase 1（沙箱扩展） | 高风险高成本，需先有安全扫描与沙箱扩展基础 |
 | 18 | 多语言 / 多文件项目（多文件 + 构建流水线） | Phase 15 | Phase 14 之后 | Phase 1 + Phase 14 | 依赖动态后端与多文件沙箱，属长期能力 |
 
@@ -128,7 +128,11 @@
 
 **临时顺序调整（2026-11-04，仅影响实施时点）**：本轮跳过 Phase 5、先完整交付 Phase 10。理由：Phase 5（多 Agent 协作，21 points）体量远大于当前交付窗口，半途停下会再次留下半成品；Phase 10 只依赖 Phase 1 的沙箱能力，可在窗口内完整实现、测试与验证。该调整不改变 Phase 编号、依赖关系与文档引用，**Phase 5 仍是下一轮首位**。
 
+**临时顺序调整（2026-11-04，Phase 13 提前）**：本轮在 Phase 10 之后先做 Phase 13（用户自选 AI API），Phase 11（知识库 + RAG）顺延。理由：Phase 11 体量与 Phase 5 同级，当前交付窗口无法完整完成；Phase 13 与刚完成的供应商层直接相邻、体量可控，可完整交付测试与前端。该调整不改变编号与依赖，**下一轮首位仍是 Phase 5，其次 Phase 11**。
+
 **Phase 10 SSE 约定（2026-11-04）**：事件类型固定为 `stage_started` / `stage_finished` / `file_created` / `log` / `error` / `done`；一次构建以 `(user_id, project_id, build_id)` 定位，`seq` 在构建内递增；`done` 与 `error` 为终止事件，服务端发送后主动关闭连接；鉴权沿用 Phase 17 的 JWT，SSE 端点优先读 `Authorization: Bearer`，浏览器原生 `EventSource` 可用 `?access_token=` 兜底。事件只含文件名与字节数，不落页面正文。
+
+**Phase 13 密钥约定（2026-11-04）**：`user_ai_configs.user_id` 唯一；`api_key_encrypted` 由 `APP_AUTH_SECRET` 经 SHA-256 派生 Fernet key 加密，明文不落库、不写日志；接口只返回 `sk-****abcd` 掩码。生成请求内把用户 provider 置于 `aihub` 链首位，失败后按系统默认链降级，并在 `stage_finished.data.fallbacks` 与错误 `details.fallback_message` 标注「已回退系统默认」。
 
 **Phase 8 跳过 / 暂缓说明（用户决策）**：
 

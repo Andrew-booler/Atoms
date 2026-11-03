@@ -4,19 +4,34 @@
 OutputProvider 的接口形状；模拟输出没有 usage 时返回 None。
 """
 import contextvars
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 Tracker = Dict[str, int]
 _usage: contextvars.ContextVar[Optional[Tracker]] = contextvars.ContextVar(
     "studio_ai_usage", default=None
 )
+_fallbacks: contextvars.ContextVar[List[Dict[str, Any]]] = contextvars.ContextVar(
+    "studio_ai_fallbacks", default=[]
+)
 
 
 def begin_stage() -> contextvars.Token:
     """开始统计一个阶段，返回用于结束统计的 token。"""
+    _fallbacks.set([])
     return _usage.set(
         {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0, "calls": 0}
     )
+
+
+def record_fallback(payload: Dict[str, Any]) -> None:
+    """记录一次供应商降级；仅在阶段统计开启时生效。"""
+    if _usage.get() is None:
+        return
+    _fallbacks.set([*_fallbacks.get(), payload])
+
+
+def fallbacks() -> List[Dict[str, Any]]:
+    return list(_fallbacks.get())
 
 
 def record_usage(usage: Any) -> None:

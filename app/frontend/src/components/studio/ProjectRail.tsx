@@ -1,4 +1,4 @@
-import { Database, FolderOpen, LayoutGrid, Plus, Rocket, Trash2 } from 'lucide-react';
+import { Database, FolderOpen, LayoutGrid, Plus, Rocket, Settings, Trash2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { ProjectSummary } from '@/lib/studio';
 
@@ -7,17 +7,18 @@ interface ProjectRailProps {
   activeId: number | null;
   loading: boolean;
   busy: boolean;
-  activeNav: 'studio' | 'deploy' | 'cloud';
+  activeNav: 'studio' | 'deploy' | 'cloud' | 'settings';
   onSelect: (project: ProjectSummary) => void;
   onCreate: () => void;
   onDelete: (project: ProjectSummary) => void;
-  onNavigate: (target: 'studio' | 'deploy' | 'cloud') => void;
+  onNavigate: (target: 'studio' | 'deploy' | 'cloud' | 'settings') => void;
 }
 
 const navItems = [
   { key: 'studio' as const, label: '工作台', icon: LayoutGrid },
   { key: 'deploy' as const, label: '部署与分享', icon: Rocket },
   { key: 'cloud' as const, label: 'Cloud 后端', icon: Database },
+  { key: 'settings' as const, label: '设置', icon: Settings },
 ];
 
 export function ProjectRail({

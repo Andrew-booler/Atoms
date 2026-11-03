@@ -179,15 +179,15 @@ describe('导航', () => {
     const props = railProps({ busy: true });
     render(<ProjectRail {...props} />);
 
-    for (const name of ['工作台', '部署与分享', 'Cloud 后端', '新建项目']) {
+    for (const name of ['工作台', '部署与分享', 'Cloud 后端', '设置', '新建项目']) {
       expect(screen.getByRole('button', { name })).toBeDisabled();
     }
     expect(screen.getByRole('button', { name: '删除项目 演示项目' })).toBeDisabled();
     expect(screen.getByText('演示项目').closest('button')).toBeDisabled();
 
-    // 六个可交互控件（3 导航 + 新建 + 项目 + 删除）全部禁用
+    // 七个可交互控件（4 导航 + 新建 + 项目 + 删除）全部禁用
     expect(screen.getAllByRole('button').filter((node) => node.hasAttribute('disabled'))).toHaveLength(
-      6
+      7
     );
   });
 });

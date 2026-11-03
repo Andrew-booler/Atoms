@@ -8,12 +8,14 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
 from sqlalchemy.pool import NullPool
 from routers import studio
+from routers import user_ai
 from services import studio_output
 from core.database import get_db
 from core.exception_handlers import register_exception_handlers
 from models.auth import User
 from models.build_events import BuildEvent
 from models.execution import Execution
+from models.user_ai_config import UserAIConfig
 from services.execution import ExecutionService
 
 SCHEMA = os.environ.get("STUDIO_TEST_SCHEMA", "studio_test_t1")
@@ -87,6 +89,7 @@ TABLES = [
     Execution.__table__,
     User.__table__,
     BuildEvent.__table__,
+    UserAIConfig.__table__,
 ]
 
 
@@ -128,6 +131,7 @@ async def lifespan(app):
 app = FastAPI(lifespan=lifespan)
 app.dependency_overrides[get_db] = database
 app.include_router(studio.router)
+app.include_router(user_ai.router)
 register_exception_handlers(app)
 
 
@@ -135,7 +139,7 @@ register_exception_handlers(app)
 async def reset():
     state.update(stage="", mode="", remaining=0)
     async with engine.begin() as connection:
-        await connection.execute(text(f'TRUNCATE "{SCHEMA}".studio_messages, "{SCHEMA}".studio_versions, "{SCHEMA}".projects, "{SCHEMA}".executions, "{SCHEMA}".build_events RESTART IDENTITY'))
+        await connection.execute(text(f'TRUNCATE "{SCHEMA}".studio_messages, "{SCHEMA}".studio_versions, "{SCHEMA}".projects, "{SCHEMA}".executions, "{SCHEMA}".build_events, "{SCHEMA}".user_ai_configs RESTART IDENTITY'))
     return {"schema": SCHEMA, "reset": True}
 
 

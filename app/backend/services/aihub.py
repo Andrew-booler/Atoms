@@ -6,6 +6,7 @@ plus speech transcription capabilities.
 
 import asyncio
 import base64
+import contextvars
 import io
 import json
 import logging
@@ -201,8 +202,26 @@ class AllProvidersFailedError(RuntimeError):
         super().__init__(f"AI 全部供应商调用失败: {detail}")
 
 
+#: 用户自选 provider（工作区级配置）：请求内由 services.user_ai_config 激活。
+_user_provider: contextvars.ContextVar[Optional[ProviderConfig]] = contextvars.ContextVar(
+    "user_ai_provider", default=None
+)
+
+
+def set_user_provider(provider: Optional[ProviderConfig]) -> contextvars.Token:
+    return _user_provider.set(provider)
+
+
+def reset_user_provider(token: contextvars.Token) -> None:
+    _user_provider.reset(token)
+
+
+def current_user_provider() -> Optional[ProviderConfig]:
+    return _user_provider.get()
+
+
 def _build_providers() -> List[ProviderConfig]:
-    """按优先级从环境变量构建供应商链；缺失 base_url/api_key/model 的整家跳过。"""
+    """按优先级从环境变量构建供应商链；用户自选配置始终排在最前。"""
     order = os.environ.get("APP_AI_PROVIDER_ORDER", AI_PROVIDER_ORDER)
     wanted = [item.strip().lower() for item in order.split(",") if item.strip()]
     thinking_enabled = _env_bool("APP_AI_ENABLE_THINKING", False)
@@ -246,6 +265,10 @@ def _build_providers() -> List[ProviderConfig]:
                 thinking_budget=_env_int("APP_STUDIO_THINKING_BUDGET", STUDIO_THINKING_BUDGET),
             )
         )
+
+    user_provider = _user_provider.get()
+    if user_provider is not None:
+        providers.insert(0, user_provider)
     return providers
 
 
@@ -284,6 +307,24 @@ def _provider_errors() -> tuple:
     from openai import APIError
 
     return (APIError,)
+
+
+def _record_fallback(failures: List[ProviderFailure], provider: ProviderConfig) -> None:
+    """记录一次降级：自选接入失败时明确标记“已回退系统默认”。"""
+    if not failures:
+        return
+    previous = failures[0]
+    is_user = previous.provider == "user_custom"
+    payload = {
+        "from": previous.provider,
+        "to": provider.name,
+        "reason": previous.reason,
+        "fallback_to_system": is_user,
+        "message": "自选接入失败，已回退系统默认供应商。" if is_user else "已降级到备用供应商。",
+    }
+    from services import ai_usage
+
+    ai_usage.record_fallback(payload)
 
 
 class AIHubService:
@@ -410,6 +451,7 @@ class AIHubService:
                     "total_tokens": response.usage.total_tokens,
                 }
 
+            _record_fallback(failures, provider)
             return GenTxtResponse(content=content, model=provider.model, usage=usage)
 
         logger.error("AI 全部供应商失败: %s", "; ".join(f"{f.provider}: {f.reason}" for f in failures))
@@ -456,6 +498,7 @@ class AIHubService:
                 continue
 
             if produced:
+                _record_fallback(failures, provider)
                 return
 
             failures.append(ProviderFailure(provider.name, provider.model, "empty stream"))
