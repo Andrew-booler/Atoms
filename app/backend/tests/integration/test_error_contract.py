@@ -59,7 +59,7 @@ def test_validation_error_is_readable_chinese(client):
 def test_legacy_http_exception_hides_raw_detail(client):
     response = client.get("/legacy")
     assert response.status_code == 404
-    assert response.json()["code"] == "INTERNAL_RESOURCE_MISSING"
+    assert response.json()["code"] == "RESOURCE_NOT_FOUND"
     assert "Internal path" not in response.text
 
 

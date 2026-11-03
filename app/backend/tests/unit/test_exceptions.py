@@ -165,8 +165,8 @@ def test_http_exception_maps_to_contract_without_raw_detail():
     response = _client().get("/http-error")
     assert response.status_code == 404
     body = response.json()
-    assert body["code"] == "INTERNAL_RESOURCE_MISSING"
-    assert body["message"] == "请求的资源不存在。"
+    assert body["code"] == "RESOURCE_NOT_FOUND"
+    assert body["message"] == "资源不存在或已被删除。"
     assert "Not Found" not in response.text
 
 

@@ -21,9 +21,7 @@ ISSUER = "https://issuer.example.test"
 CLIENT_ID = "client-abc"
 
 _ENV = {
-    "JWT_SECRET_KEY": "unit-secret-key",
-    "JWT_ALGORITHM": "HS256",
-    "JWT_EXPIRE_MINUTES": "60",
+    "APP_AUTH_SECRET": "unit-secret-key",
     "OIDC_ISSUER_URL": ISSUER,
     "OIDC_CLIENT_ID": CLIENT_ID,
     "OIDC_CLIENT_SECRET": "client-secret",
@@ -153,12 +151,12 @@ def test_decode_unsigned_alg_none_token_is_rejected(auth_env):
 
 
 def test_access_token_requires_configured_secret(monkeypatch):
-    monkeypatch.setenv("JWT_SECRET_KEY", "")
-    settings.__dict__.pop("jwt_secret_key", None)
+    monkeypatch.setenv("APP_AUTH_SECRET", "")
+    settings.__dict__.pop("app_auth_secret", None)
 
-    with pytest.raises(ValueError, match="JWT secret key is not configured"):
+    with pytest.raises(auth.AuthConfigurationError, match="APP_AUTH_SECRET"):
         auth.create_access_token({"sub": "user-1"})
-    with pytest.raises(auth.AccessTokenError, match="misconfigured"):
+    with pytest.raises(auth.AuthConfigurationError, match="APP_AUTH_SECRET"):
         auth.decode_access_token("any-token")
 
 

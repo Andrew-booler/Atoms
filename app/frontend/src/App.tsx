@@ -5,6 +5,7 @@ import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import Index from './pages/Index';
 import DeployPage from './pages/DeployPage';
 import CloudPage from './pages/CloudPage';
+import LoginPage from './pages/LoginPage';
 // MODULE_IMPORTS_START
 // MODULE_IMPORTS_END
 
@@ -15,6 +16,7 @@ const AppRoutes = () => (
     <Route path="/" element={<Index />} />
     <Route path="/deploy" element={<DeployPage />} />
     <Route path="/cloud" element={<CloudPage />} />
+    <Route path="/login" element={<LoginPage />} />
     {/* <Route path="/blog/*" element={<BlogRoutes />} /> */}
     {/* MODULE_ROUTES_START */}
     {/* MODULE_ROUTES_END */}

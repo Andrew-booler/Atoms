@@ -11,9 +11,21 @@ from routers import studio
 from services import studio_output
 from core.database import get_db
 from core.exception_handlers import register_exception_handlers
+from models.auth import User
 from models.execution import Execution
+from services.execution import ExecutionService
 
 SCHEMA = os.environ.get("STUDIO_TEST_SCHEMA", "studio_test_t1")
+TEST_USER_ID = "studio-test-user"
+OTHER_USER_ID = "studio-other-user"
+ADMIN_USER_ID = "admin-1"
+NORMAL_USER_ID = "user-1"
+SEED_USERS = [
+    (TEST_USER_ID, "studio-test-user@atoms.local", "测试用户", "user", False),
+    (OTHER_USER_ID, "studio-other-user@atoms.local", "其他用户", "user", False),
+    (ADMIN_USER_ID, "admin-1@atoms.local", "管理员", "admin", False),
+    (NORMAL_USER_ID, "user-1@atoms.local", "普通用户", "user", False),
+]
 if not re.fullmatch(r"studio_test_[a-z0-9_]+", SCHEMA):
     raise RuntimeError("测试命名空间必须以studio_test_开头")
 engine = create_async_engine(
@@ -67,16 +79,47 @@ class ControlledProvider(studio_output.MockOutputProvider):
         return await super().artifact(requirement, plan, outline, **kwargs)
 
 
-TABLES = [studio.Projects.__table__, studio.Studio_messages.__table__, studio.Studio_versions.__table__, Execution.__table__]
+TABLES = [
+    studio.Projects.__table__,
+    studio.Studio_messages.__table__,
+    studio.Studio_versions.__table__,
+    Execution.__table__,
+    User.__table__,
+]
+
+
+async def seed_users(connection) -> None:
+    """写入集成测试所需的固定用户；使用 ON CONFLICT 保证重复启动幂等。"""
+    await connection.execute(
+        text(
+            f'INSERT INTO "{SCHEMA}".users (id, email, name, role, password_hash, is_legacy) '
+            "VALUES (:id, :email, :name, :role, NULL, :is_legacy) ON CONFLICT DO NOTHING"
+        ),
+        [
+            {"id": uid, "email": email, "name": name, "role": role, "is_legacy": is_legacy}
+            for uid, email, name, role, is_legacy in SEED_USERS
+        ],
+    )
+
+
+async def rebuild_schema(connection) -> None:
+    """重建测试 schema，确保模型新增列后不会撞上上一轮遗留的旧表结构。"""
+    await connection.execute(text(f'DROP SCHEMA IF EXISTS "{SCHEMA}" CASCADE'))
+    await connection.execute(text(f'CREATE SCHEMA "{SCHEMA}"'))
+    await connection.run_sync(lambda sync: studio.Projects.metadata.create_all(sync, tables=TABLES))
+    await seed_users(connection)
 
 
 @asynccontextmanager
 async def lifespan(app):
+    # schema 每例重建，执行记录会随之消失；容器不会，必须在进出时按标签回收，
+    # 否则残留容器会占满总量上限，导致后续用例误报 SANDBOX_START_FAILED。
+    ExecutionService.cleanup_orphan_containers()
     async with engine.begin() as connection:
-        await connection.execute(text(f'CREATE SCHEMA IF NOT EXISTS "{SCHEMA}"'))
-        await connection.run_sync(lambda sync: studio.Projects.metadata.create_all(sync, tables=TABLES))
+        await rebuild_schema(connection)
     studio_output._provider = ControlledProvider()
     yield
+    ExecutionService.cleanup_orphan_containers()
     await engine.dispose()
 
 

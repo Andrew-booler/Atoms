@@ -1,4 +1,4 @@
-"""Atoms Cloud共享业务接口：真实持久化，默认预置输出，无产品登录门禁。"""
+"""Atoms Cloud 业务接口：全部要求登录，所有查询按 user_id 隔离。"""
 import json
 import logging
 from typing import Any, Dict, List, Optional
@@ -17,9 +17,11 @@ from core.exceptions import (
     SandboxUnavailableError,
     ValidationError,
 )
+from dependencies.auth import get_current_user
 from models.projects import Projects
 from models.studio_messages import Studio_messages
 from models.studio_versions import Studio_versions
+from schemas.auth import UserResponse
 from schemas.studio import (
     ArtifactRequest,
     BuildResponse,
@@ -50,8 +52,6 @@ from services.studio_validation import (
     validate_outline_payload,
     validate_plan_payload,
 )
-
-SHARED_CONTEXT = "studio-shared"
 
 logger = logging.getLogger(__name__)
 
@@ -119,17 +119,36 @@ def _plan_to_text(plan: PlanPayload) -> str:
 
 async def _load_project(db: AsyncSession, project_id: int, user_id: str) -> Projects:
     result = await db.execute(
-        select(Projects).where(Projects.id == project_id)
+        select(Projects).where(Projects.id == project_id, Projects.user_id == user_id)
     )
     project = result.scalar_one_or_none()
     if project is None:
-        raise NotFoundError(error_codes.STUDIO_PROJECT_NOT_FOUND)
+        # 越权与不存在统一返回 404，避免泄露资源是否存在。
+        raise NotFoundError(error_codes.RESOURCE_NOT_FOUND)
     return project
+
+
+async def _load_version(db: AsyncSession, version_id: int, user_id: str) -> Studio_versions:
+    row = (
+        await db.execute(
+            select(Studio_versions).where(
+                Studio_versions.id == version_id,
+                Studio_versions.user_id == user_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if row is None:
+        # 越权与不存在统一返回 404，避免泄露版本是否存在。
+        raise NotFoundError(error_codes.RESOURCE_NOT_FOUND)
+    return row
 
 
 async def _summary(db: AsyncSession, project: Projects) -> ProjectSummary:
     count = await db.scalar(
-        select(func.count(Studio_versions.id)).where(Studio_versions.project_id == project.id)
+        select(func.count(Studio_versions.id)).where(
+            Studio_versions.project_id == project.id,
+            Studio_versions.user_id == project.user_id,
+        )
     )
     return ProjectSummary(
         id=project.id,
@@ -168,7 +187,9 @@ async def _append_message(
 
 # ---------- Routes ----------
 @router.get("/models", response_model=ModelsResponse)
-async def list_models() -> ModelsResponse:
+async def list_models(
+    current_user: UserResponse = Depends(get_current_user),
+) -> ModelsResponse:
     """可切换的 AI 配置；前端只拿到 profile 与模型 id，不接触任何密钥。"""
     return ModelsResponse(
         profiles=[ModelOption(**item) for item in studio_ai.available_models()],
@@ -178,11 +199,13 @@ async def list_models() -> ModelsResponse:
 
 @router.get("/projects", response_model=List[ProjectSummary])
 async def list_projects(
+    current_user: UserResponse = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> List[ProjectSummary]:
     result = await db.execute(
         select(Projects)
-                .order_by(Projects.updated_at.desc(), Projects.id.desc())
+        .where(Projects.user_id == current_user.id)
+        .order_by(Projects.updated_at.desc(), Projects.id.desc())
         .limit(60)
     )
     return [await _summary(db, project) for project in result.scalars().all()]
@@ -191,10 +214,11 @@ async def list_projects(
 @router.post("/projects", response_model=ProjectSummary, status_code=201)
 async def create_project(
     data: ProjectCreate,
+    current_user: UserResponse = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> ProjectSummary:
     project = Projects(
-        user_id=SHARED_CONTEXT,
+        user_id=current_user.id,
         name=data.name.strip(),
         description=data.description.strip(),
         status="active",
@@ -209,14 +233,18 @@ async def create_project(
 @router.get("/projects/{project_id}", response_model=ProjectDetail)
 async def get_project(
     project_id: int,
+    current_user: UserResponse = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> ProjectDetail:
-    project = await _load_project(db, project_id, SHARED_CONTEXT)
+    project = await _load_project(db, project_id, current_user.id)
 
     messages = (
         await db.execute(
             select(Studio_messages)
-            .where(Studio_messages.project_id == project_id)
+            .where(
+                Studio_messages.project_id == project_id,
+                Studio_messages.user_id == current_user.id,
+            )
             .order_by(Studio_messages.id.asc())
             .limit(400)
         )
@@ -225,7 +253,10 @@ async def get_project(
     versions = (
         await db.execute(
             select(Studio_versions)
-            .where(Studio_versions.project_id == project_id)
+            .where(
+                Studio_versions.project_id == project_id,
+                Studio_versions.user_id == current_user.id,
+            )
             .order_by(Studio_versions.version_no.desc())
         )
     ).scalars().all()
@@ -256,11 +287,18 @@ async def get_project(
 @router.delete("/projects/{project_id}")
 async def delete_project(
     project_id: int,
+    current_user: UserResponse = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> Dict[str, Any]:
-    project = await _load_project(db, project_id, SHARED_CONTEXT)
-    await db.execute(delete(Studio_messages).where(Studio_messages.project_id == project.id))
-    await db.execute(delete(Studio_versions).where(Studio_versions.project_id == project.id))
+    project = await _load_project(db, project_id, current_user.id)
+    await db.execute(delete(Studio_messages).where(
+        Studio_messages.project_id == project.id,
+        Studio_messages.user_id == current_user.id,
+    ))
+    await db.execute(delete(Studio_versions).where(
+        Studio_versions.project_id == project.id,
+        Studio_versions.user_id == current_user.id,
+    ))
     await db.delete(project)
     await _commit(db)
     return {"deleted": True, "id": project_id}
@@ -270,13 +308,14 @@ async def delete_project(
 async def append_message(
     project_id: int,
     data: MessageCreate,
+    current_user: UserResponse = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> MessageOut:
-    project = await _load_project(db, project_id, SHARED_CONTEXT)
+    project = await _load_project(db, project_id, current_user.id)
     row = await _append_message(
         db,
         project_id=project_id,
-        user_id=SHARED_CONTEXT,
+        user_id=current_user.id,
         role=data.role,
         kind=data.kind,
         content=data.content,
@@ -290,10 +329,11 @@ async def append_message(
 async def plan(
     project_id: int,
     data: PlanRequest,
+    current_user: UserResponse = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> PlanResponse:
     """阶段一：把需求拆成结构化计划，等用户确认后再执行。"""
-    project = await _load_project(db, project_id, SHARED_CONTEXT)
+    project = await _load_project(db, project_id, current_user.id)
     project_name = project.name
     await _commit(db)
 
@@ -321,19 +361,23 @@ async def plan(
     text = _plan_to_text(payload)
     model = studio_ai.resolve_model(data.profile)
 
-    project = await _load_project(db, project_id, SHARED_CONTEXT)
+    project = await _load_project(db, project_id, current_user.id)
     existing = (await db.execute(select(Studio_messages).where(
-        Studio_messages.project_id == project_id, Studio_messages.kind == "plan"
+        Studio_messages.project_id == project_id,
+        Studio_messages.user_id == current_user.id,
+        Studio_messages.kind == "plan",
     ).order_by(Studio_messages.id.desc()))).scalars().first()
     latest_user = (await db.execute(select(Studio_messages).where(
-        Studio_messages.project_id == project_id, Studio_messages.role == "user"
+        Studio_messages.project_id == project_id,
+        Studio_messages.user_id == current_user.id,
+        Studio_messages.role == "user",
     ).order_by(Studio_messages.id.desc()))).scalars().first()
     if existing and _parse_meta(existing.meta).get("requirement_message_id") == (latest_user.id if latest_user else None) and _parse_meta(existing.meta).get("requirement") == data.requirement:
         return PlanResponse(plan=PlanPayload(**_parse_meta(existing.meta)["plan"]), message=_message_out(existing), model=model)
     message = await _append_message(
         db,
         project_id=project_id,
-        user_id=SHARED_CONTEXT,
+        user_id=current_user.id,
         role="assistant",
         kind="plan",
         content=text,
@@ -356,10 +400,11 @@ async def plan(
 async def outline(
     project_id: int,
     data: OutlineRequest,
+    current_user: UserResponse = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> OutlineResponse:
     """阶段二：确认计划后，先产出界面结构与示例数据。"""
-    await _load_project(db, project_id, SHARED_CONTEXT)
+    await _load_project(db, project_id, current_user.id)
     await _commit(db)
 
     try:
@@ -388,11 +433,13 @@ async def outline(
     return OutlineResponse(outline=payload, model=studio_ai.resolve_model(data.profile))
 
 
-async def _try_run_preview(db: AsyncSession, html: str, version_id: int) -> Optional[str]:
+async def _try_run_preview(
+    db: AsyncSession, html: str, version_id: int, user_id: str
+) -> Optional[str]:
     """尝试启动沙箱预览；Docker 不可用或失败时返回 None，不抛出。"""
     service = ExecutionService(db)
     try:
-        execution = await service.run_html(html, version_id)
+        execution = await service.run_html(html, version_id, user_id)
         return execution.preview_url
     except SandboxUnavailableError as exc:
         logger.warning("沙箱不可用，artifact 已保存但预览未启动：%s", exc.code)
@@ -406,10 +453,11 @@ async def _try_run_preview(db: AsyncSession, html: str, version_id: int) -> Opti
 async def artifact(
     project_id: int,
     data: ArtifactRequest,
+    current_user: UserResponse = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> BuildResponse:
     """阶段三：产出真正可运行的单文件应用，并保存为新版本。"""
-    await _load_project(db, project_id, SHARED_CONTEXT)
+    await _load_project(db, project_id, current_user.id)
     await _commit(db)
 
     base_version = None
@@ -417,10 +465,11 @@ async def artifact(
         result = await db.execute(select(Studio_versions).where(
             Studio_versions.id == data.base_version_id,
             Studio_versions.project_id == project_id,
+            Studio_versions.user_id == current_user.id,
         ))
         base_version = result.scalar_one_or_none()
         if base_version is None:
-            raise NotFoundError(error_codes.STUDIO_VERSION_NOT_FOUND)
+            raise NotFoundError(error_codes.RESOURCE_NOT_FOUND)
 
     try:
         artifact_html = await studio_ai.get_provider().artifact(
@@ -448,22 +497,33 @@ async def artifact(
         raise ProviderError(
             error_codes.STUDIO_ARTIFACT_INVALID, details={"reason": str(exc)}
         ) from exc
-    project = await _load_project(db, project_id, SHARED_CONTEXT)
+    project = await _load_project(db, project_id, current_user.id)
     plans = (await db.execute(select(Studio_messages).where(
-        Studio_messages.project_id == project_id, Studio_messages.kind == "plan"
+        Studio_messages.project_id == project_id,
+        Studio_messages.user_id == current_user.id,
+        Studio_messages.kind == "plan",
     ).order_by(Studio_messages.id.desc()))).scalars().all()
     plan_message = next((row for row in plans if _parse_meta(row.meta).get("requirement") == data.requirement and
         _plan_request_text(_parse_meta(row.meta).get("plan", {})) == data.plan_summary), None)
     if plan_message and _parse_meta(plan_message.meta).get("approved"):
         version_id = _parse_meta(plan_message.meta).get("version_id")
-        saved = (await db.execute(select(Studio_versions).where(Studio_versions.id == version_id))).scalar_one()
-        builds = (await db.execute(select(Studio_messages).where(Studio_messages.project_id == project_id, Studio_messages.kind == "build"))).scalars().all()
+        saved = (await db.execute(select(Studio_versions).where(
+            Studio_versions.id == version_id,
+            Studio_versions.project_id == project_id,
+            Studio_versions.user_id == current_user.id,
+        ))).scalar_one()
+        builds = (await db.execute(select(Studio_messages).where(
+            Studio_messages.project_id == project_id,
+            Studio_messages.user_id == current_user.id,
+            Studio_messages.kind == "build",
+        ))).scalars().all()
         saved_message = next(row for row in builds if _parse_meta(row.meta).get("version_id") == version_id)
-        preview_url = await _try_run_preview(db, saved.artifact_html, saved.id)
+        preview_url = await _try_run_preview(db, saved.artifact_html, saved.id, current_user.id)
         return BuildResponse(project=await _summary(db, project), version=VersionSummary(id=saved.id,version_no=saved.version_no,label=saved.label,created_at=saved.created_at),message=_message_out(saved_message),outline_title=data.outline.title,artifact_html=saved.artifact_html, preview_url=preview_url)
     latest = await db.scalar(
         select(func.max(Studio_versions.version_no)).where(
-            Studio_versions.project_id == project_id
+            Studio_versions.project_id == project_id,
+            Studio_versions.user_id == current_user.id,
         )
     )
     next_no = int(latest or 0) + 1
@@ -474,7 +534,7 @@ async def artifact(
     plan_summary = data.plan_summary or (base_version.plan_summary if base_version else "")
 
     version = Studio_versions(
-        user_id=SHARED_CONTEXT,
+        user_id=current_user.id,
         project_id=project_id,
         version_no=next_no,
         label=label,
@@ -487,7 +547,7 @@ async def artifact(
     message = await _append_message(
         db,
         project_id=project_id,
-        user_id=SHARED_CONTEXT,
+        user_id=current_user.id,
         role="assistant",
         kind="build",
         content=f"已生成「{title}」的可运行版本 v{next_no}。",
@@ -510,7 +570,7 @@ async def artifact(
     project.preview_ready = True
     await _commit(db)
 
-    preview_url = await _try_run_preview(db, artifact_html, version.id)
+    preview_url = await _try_run_preview(db, artifact_html, version.id, current_user.id)
 
     return BuildResponse(
         project=await _summary(db, project),
@@ -531,10 +591,11 @@ async def artifact(
 async def edit_artifact(
     project_id: int,
     data: EditArtifactRequest,
+    current_user: UserResponse = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> BuildResponse:
     """阶段三·编辑：直接修改产物源码，保存为新版本并重跑预览。"""
-    project = await _load_project(db, project_id, SHARED_CONTEXT)
+    project = await _load_project(db, project_id, current_user.id)
 
     try:
         html = validate_artifact_html(data.html)
@@ -547,6 +608,7 @@ async def edit_artifact(
     if project.current_version:
         base_version = (await db.execute(select(Studio_versions).where(
             Studio_versions.project_id == project_id,
+            Studio_versions.user_id == current_user.id,
             Studio_versions.version_no == project.current_version,
         ))).scalar_one_or_none()
 
@@ -557,7 +619,10 @@ async def edit_artifact(
         current_title = tail or current_title
 
     latest_no = await db.scalar(
-        select(func.max(Studio_versions.version_no)).where(Studio_versions.project_id == project_id)
+        select(func.max(Studio_versions.version_no)).where(
+            Studio_versions.project_id == project_id,
+            Studio_versions.user_id == current_user.id,
+        )
     )
     next_no = int(latest_no or 0) + 1
 
@@ -567,7 +632,7 @@ async def edit_artifact(
         label += f" · {note}"
 
     version = Studio_versions(
-        user_id=SHARED_CONTEXT,
+        user_id=current_user.id,
         project_id=project_id,
         version_no=next_no,
         label=label,
@@ -580,7 +645,7 @@ async def edit_artifact(
     message = await _append_message(
         db,
         project_id=project_id,
-        user_id=SHARED_CONTEXT,
+        user_id=current_user.id,
         role="assistant",
         kind="build",
         content=f"已手动编辑产物并保存为 {label}。",
@@ -596,7 +661,7 @@ async def edit_artifact(
     project.preview_ready = True
     await _commit(db)
 
-    preview_url = await _try_run_preview(db, html, version.id)
+    preview_url = await _try_run_preview(db, html, version.id, current_user.id)
 
     return BuildResponse(
         project=await _summary(db, project),
@@ -616,14 +681,10 @@ async def edit_artifact(
 @router.get("/versions/{version_id}", response_model=VersionDetail)
 async def get_version(
     version_id: int,
+    current_user: UserResponse = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> VersionDetail:
-    result = await db.execute(
-        select(Studio_versions).where(Studio_versions.id == version_id)
-    )
-    version = result.scalar_one_or_none()
-    if version is None:
-        raise NotFoundError(error_codes.STUDIO_VERSION_NOT_FOUND)
+    version = await _load_version(db, version_id, current_user.id)
     return VersionDetail(
         id=version.id,
         project_id=version.project_id,
@@ -638,17 +699,15 @@ async def get_version(
 @router.post("/versions/{version_id}/run", response_model=ExecutionResponse)
 async def run_version(
     version_id: int,
+    current_user: UserResponse = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> ExecutionResponse:
     """对已保存版本重新启动沙箱预览。"""
-    result = await db.execute(select(Studio_versions).where(Studio_versions.id == version_id))
-    version = result.scalar_one_or_none()
-    if version is None:
-        raise NotFoundError(error_codes.STUDIO_VERSION_NOT_FOUND)
+    version = await _load_version(db, version_id, current_user.id)
 
     service = ExecutionService(db)
     try:
-        execution = await service.run_html(version.artifact_html, version_id)
+        execution = await service.run_html(version.artifact_html, version_id, current_user.id)
     except AppError:
         raise
     except Exception as exc:  # noqa: BLE001
@@ -670,13 +729,14 @@ async def run_version(
 @router.delete("/executions/{execution_id}", response_model=ExecutionResponse)
 async def stop_execution(
     execution_id: int,
+    current_user: UserResponse = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> ExecutionResponse:
     """停止并清理一个沙箱执行。"""
     service = ExecutionService(db)
-    execution = await service.stop(execution_id)
+    execution = await service.stop(execution_id, user_id=current_user.id)
     if execution is None:
-        raise NotFoundError(error_codes.STUDIO_EXECUTION_NOT_FOUND)
+        raise NotFoundError(error_codes.RESOURCE_NOT_FOUND)
     return ExecutionResponse(
         id=execution.id,
         version_id=execution.version_id,
@@ -691,18 +751,20 @@ async def stop_execution(
 async def restore_version(
     project_id: int,
     data: RestoreRequest,
+    current_user: UserResponse = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> ProjectSummary:
-    project = await _load_project(db, project_id, SHARED_CONTEXT)
+    project = await _load_project(db, project_id, current_user.id)
     result = await db.execute(
         select(Studio_versions).where(
             Studio_versions.id == data.version_id,
             Studio_versions.project_id == project_id,
+            Studio_versions.user_id == current_user.id,
         )
     )
     version = result.scalar_one_or_none()
     if version is None:
-        raise NotFoundError(error_codes.STUDIO_VERSION_NOT_FOUND)
+        raise NotFoundError(error_codes.RESOURCE_NOT_FOUND)
 
     if project.current_version == version.version_no:
         return await _summary(db, project)
@@ -711,7 +773,7 @@ async def restore_version(
     await _append_message(
         db,
         project_id=project_id,
-        user_id=SHARED_CONTEXT,
+        user_id=current_user.id,
         role="system",
         kind="note",
         content=f"已回滚到 v{version.version_no}。",

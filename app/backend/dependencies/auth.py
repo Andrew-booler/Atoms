@@ -1,64 +1,74 @@
-import hashlib
+"""认证依赖：从 Bearer Token 解析当前用户，并强制查库确认用户仍存在。"""
 import logging
-from datetime import datetime
 from typing import Optional
 
 from core import error_codes
-from core.auth import AccessTokenError, decode_access_token
+from core.auth import AccessTokenError, AuthConfigurationError, decode_access_token
+from core.database import get_db
 from core.exceptions import AuthError
 from fastapi import Depends, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from models.auth import User
 from schemas.auth import UserResponse
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
 
 bearer_scheme = HTTPBearer(auto_error=False)
 
 
+def _user_response(user: User) -> UserResponse:
+    return UserResponse(
+        id=user.id,
+        email=user.email,
+        name=user.name,
+        role=user.role,
+        last_login=user.last_login,
+    )
+
+
+async def _load_user(db: AsyncSession, user_id: str) -> User:
+    user = (
+        await db.execute(select(User).where(User.id == user_id))
+    ).scalar_one_or_none()
+    if user is None:
+        # 令牌有效但用户已被删除：视为令牌失效。
+        raise AuthError(error_codes.AUTH_INVALID_TOKEN)
+    return user
+
+
 async def get_bearer_token(
     request: Request, credentials: Optional[HTTPAuthorizationCredentials] = Depends(bearer_scheme)
 ) -> str:
-    """Extract bearer token from Authorization header."""
     if credentials and credentials.scheme.lower() == "bearer":
         return credentials.credentials
-
     logger.debug("Authentication required for request %s %s", request.method, request.url.path)
     raise AuthError(error_codes.AUTH_REQUIRED)
 
 
-async def get_current_user(token: str = Depends(get_bearer_token)) -> UserResponse:
-    """Dependency to get current authenticated user via JWT token."""
+async def get_current_user(
+    token: str = Depends(get_bearer_token),
+    db: AsyncSession = Depends(get_db),
+) -> UserResponse:
+    """必需登录：令牌无效 401，过期返回 AUTH_TOKEN_EXPIRED。"""
     try:
         payload = decode_access_token(token)
+    except AuthConfigurationError:
+        logger.error("APP_AUTH_SECRET 未配置，无法校验访问令牌")
+        raise AuthError(error_codes.AUTH_INVALID_TOKEN)
     except AccessTokenError as exc:
-        # Log error type only, not the full exception which may contain sensitive token data
+        code = error_codes.AUTH_TOKEN_EXPIRED if exc.expired else error_codes.AUTH_INVALID_TOKEN
         logger.warning("Token validation failed: %s", type(exc).__name__)
-        raise AuthError(error_codes.AUTH_INVALID_CREDENTIALS) from exc
+        raise AuthError(code) from exc
 
     user_id = payload.get("sub")
     if not user_id:
-        raise AuthError(error_codes.AUTH_INVALID_CREDENTIALS)
-
-    last_login_raw = payload.get("last_login")
-    last_login = None
-    if isinstance(last_login_raw, str):
-        try:
-            last_login = datetime.fromisoformat(last_login_raw)
-        except ValueError:
-            # Log user hash instead of actual user ID to avoid exposing sensitive information
-            pass
-
-    return UserResponse(
-        id=user_id,
-        email=payload.get("email", ""),
-        name=payload.get("name"),
-        role=payload.get("role", "user"),
-        last_login=last_login,
-    )
+        raise AuthError(error_codes.AUTH_INVALID_TOKEN)
+    return _user_response(await _load_user(db, str(user_id)))
 
 
 async def get_admin_user(current_user: UserResponse = Depends(get_current_user)) -> UserResponse:
-    """Dependency to ensure current user has admin role."""
     if current_user.role != "admin":
         raise AuthError(error_codes.AUTH_FORBIDDEN, http_status=403)
     return current_user

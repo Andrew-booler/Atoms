@@ -1,7 +1,7 @@
 """接口集成测试夹具：进程内 ASGI + 真实 PostgreSQL，AI 边界仍由受控提供者。
 
-此处覆盖根 conftest 的默认值：使用独立 schema studio_test_api，与界面集成的
-studio_test_t1 分开；逐例调用 /__test/reset 归零。PostgreSQL 不可用时跳过整组。
+studio 与 auth 测试宿主共用独立 schema studio_test_api，每次启动重建 schema，
+避免模型新增列后撞上上一轮遗留的旧表结构。PostgreSQL 不可用时跳过整组。
 """
 import os
 from contextlib import asynccontextmanager
@@ -17,15 +17,18 @@ os.environ.setdefault(
     "DATABASE_URL",
     "postgresql+asyncpg://postgres:postgres@127.0.0.1:5432/postgres",
 )
+os.environ.setdefault("APP_AUTH_SECRET", "test-auth-secret")
 
+from core.auth import create_access_token  # noqa: E402
 from core.database import get_db  # noqa: E402
 from core.exception_handlers import register_exception_handlers  # noqa: E402
-from models.auth import OIDCState, User  # noqa: E402
 from routers import auth, health  # noqa: E402
 from routers import settings as settings_router  # noqa: E402
 from testing import studio_app as host  # noqa: E402
 
-AUTH_TABLES = [User.__table__, OIDCState.__table__]
+
+def _token(user_id: str) -> str:
+    return create_access_token({"sub": user_id})
 
 
 def _api_app() -> FastAPI:
@@ -34,10 +37,7 @@ def _api_app() -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         async with host.engine.begin() as connection:
-            await connection.execute(text(f'CREATE SCHEMA IF NOT EXISTS "{host.SCHEMA}"'))
-            await connection.run_sync(lambda sync: User.metadata.create_all(sync, tables=AUTH_TABLES))
-            for table in AUTH_TABLES:
-                await connection.execute(text(f'TRUNCATE "{host.SCHEMA}"."{table.name}" RESTART IDENTITY'))
+            await host.rebuild_schema(connection)
         yield
         # 逐例释放连接池，避免连接被带到下一条用例的新事件循环（与测试宿主 lifespan 一致）。
         await host.engine.dispose()
@@ -76,9 +76,27 @@ async def client():
     except Exception:
         pytest.skip("PostgreSQL 不可用，跳过接口集成测试")
 
+    headers = {"Authorization": f"Bearer {_token(host.TEST_USER_ID)}"}
     async with host.lifespan(host.app):
         transport = httpx.ASGITransport(app=host.app)
-        async with httpx.AsyncClient(transport=transport, base_url="http://test") as ac:
+        async with httpx.AsyncClient(
+            transport=transport, base_url="http://test", headers=headers
+        ) as ac:
             reset = await ac.post("/__test/reset")
             assert reset.status_code == 200
             yield ac
+
+
+@pytest.fixture
+def test_user_id() -> str:
+    return host.TEST_USER_ID
+
+
+@pytest.fixture
+def other_headers() -> dict[str, str]:
+    return {"Authorization": f"Bearer {_token(host.OTHER_USER_ID)}"}
+
+
+@pytest.fixture
+def admin_headers() -> dict[str, str]:
+    return {"Authorization": f"Bearer {_token(host.ADMIN_USER_ID)}"}

@@ -17,6 +17,10 @@ class Settings(BaseSettings):
     host: str = "0.0.0.0"
     port: int = 8000
 
+    # Authentication (Phase 17)：缺失 APP_AUTH_SECRET 时启动即失败，不生成随机密钥。
+    app_auth_secret: str | None = None
+    app_auth_token_expire_minutes: int = 10080  # 7 天
+
     # AWS Lambda Configuration
     is_lambda: bool = False
     lambda_function_name: str = "fastapi-backend"

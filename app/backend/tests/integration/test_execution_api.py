@@ -64,7 +64,7 @@ def docker_required():
 async def test_run_html_serves_via_docker(service, docker_required):
     """真实起容器，GET preview_url 应返回写入的 HTML。"""
     html = "<html><body><h1>sandbox-ok</h1></body></html>"
-    execution = await service.run_html(html, version_id=1)
+    execution = await service.run_html(html, version_id=1, user_id=host.TEST_USER_ID)
 
     assert execution.status == "running"
     assert execution.preview_url.startswith("http://127.0.0.1:")
@@ -90,7 +90,7 @@ async def test_stop_execution_removes_container(service, docker_required):
     """停止后容器应被移除。"""
     import subprocess
     html = "<html><body>stop-me</body></html>"
-    execution = await service.run_html(html, version_id=2)
+    execution = await service.run_html(html, version_id=2, user_id=host.TEST_USER_ID)
     container_id = execution.container_id
 
     stopped = await service.stop(execution.id)
@@ -106,7 +106,7 @@ async def test_stop_execution_removes_container(service, docker_required):
 async def test_expired_execution_cleanup(service, docker_required):
     """过期执行应被 cleanup_expired 停止。"""
     html = "<html><body>expire</body></html>"
-    execution = await service.run_html(html, version_id=3)
+    execution = await service.run_html(html, version_id=3, user_id=host.TEST_USER_ID)
 
     execution.expires_at = datetime.now(timezone.utc) - timedelta(seconds=1)
     await service.db.commit()

@@ -87,7 +87,7 @@ class ValidationError(AppError):
 
 
 class NotFoundError(AppError):
-    code = error_codes.INTERNAL_RESOURCE_MISSING
+    code = error_codes.RESOURCE_NOT_FOUND
     http_status = 404
 
 

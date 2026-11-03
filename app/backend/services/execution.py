@@ -263,7 +263,7 @@ class ExecutionService:
             logger.warning("清理工作区失败 %s: %s", workspace, exc)
 
     # ── 核心：运行 HTML ───────────────────────────────────
-    async def run_html(self, html: str, version_id: int) -> Execution:
+    async def run_html(self, html: str, version_id: int, user_id: str) -> Execution:
         """把 HTML 放进沙箱运行，返回 Execution 记录。
 
         失败时抛 SandboxUnavailableError；调用方负责处理并记录 failed 状态。
@@ -329,6 +329,7 @@ class ExecutionService:
             expires_at = datetime.now(timezone.utc) + timedelta(seconds=self.idle_timeout)
 
             execution = Execution(
+                user_id=user_id,
                 version_id=version_id,
                 container_id=container_id,
                 sandbox_id=sandbox_id,
@@ -409,8 +410,11 @@ class ExecutionService:
             logger.warning("删除沙箱容器 %s 失败：%s", reference, exc)
 
     # ── 停止单个执行 ──────────────────────────────────────
-    async def stop(self, execution_id: int) -> Optional[Execution]:
-        result = await self.db.execute(select(Execution).where(Execution.id == execution_id))
+    async def stop(self, execution_id: int, user_id: Optional[str] = None) -> Optional[Execution]:
+        conditions = [Execution.id == execution_id]
+        if user_id is not None:
+            conditions.append(Execution.user_id == user_id)
+        result = await self.db.execute(select(Execution).where(*conditions))
         execution = result.scalar_one_or_none()
         if execution is None:
             return None

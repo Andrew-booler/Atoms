@@ -69,6 +69,11 @@ async def lifespan(app: FastAPI):
     logger = logging.getLogger(__name__)
     logger.info("=== Application startup initiated ===")
 
+    # 认证密钥缺失时启动即失败，禁止静默使用随机密钥。
+    from core.auth import ensure_auth_configured
+
+    ensure_auth_configured()
+
     if not get_env_bool("MGX_IGNORE_MODULE_INIT", default=True):
         # MODULE_IMPORTS_START
         from services.database import initialize_database, close_database

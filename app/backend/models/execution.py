@@ -14,6 +14,7 @@ class Execution(Base):
     __table_args__ = {"extend_existing": True}
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True, autoincrement=True, nullable=False)
+    user_id: Mapped[str] = mapped_column(String(255), index=True, nullable=False)
     version_id: Mapped[int] = mapped_column(Integer, index=True, nullable=False)
     container_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
     # 沙箱 uuid（容器名即 atoms-sandbox-{sandbox_id}，工作区目录同名）

@@ -11,14 +11,10 @@ from routers import settings as settings_module
 
 @pytest.fixture
 def jwt_env(monkeypatch):
-    monkeypatch.setenv("JWT_SECRET_KEY", "settings-test-secret")
-    monkeypatch.setenv("JWT_ALGORITHM", "HS256")
-    monkeypatch.setenv("JWT_EXPIRE_MINUTES", "60")
-    for name in ("jwt_secret_key", "jwt_algorithm", "jwt_expire_minutes"):
-        settings.__dict__.pop(name, None)
+    monkeypatch.setenv("APP_AUTH_SECRET", "settings-test-secret")
+    settings.__dict__.pop("app_auth_secret", None)
     yield
-    for name in ("jwt_secret_key", "jwt_algorithm", "jwt_expire_minutes"):
-        settings.__dict__.pop(name, None)
+    settings.__dict__.pop("app_auth_secret", None)
 
 
 @pytest.fixture
@@ -38,7 +34,8 @@ def temp_env_files(tmp_path, monkeypatch):
 
 
 def _token(role: str) -> str:
-    return core_auth.create_access_token({"sub": "admin-1", "email": "admin@example.test", "role": role})
+    user_id = "admin-1" if role == "admin" else "user-1"
+    return core_auth.create_access_token({"sub": user_id, "email": f"{user_id}@example.test", "role": role})
 
 
 def _headers(role: str = "admin") -> dict:

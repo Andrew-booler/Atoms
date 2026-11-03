@@ -10,3 +10,5 @@ os.environ.setdefault(
     "DATABASE_URL",
     "postgresql+asyncpg://postgres:postgres@127.0.0.1:5432/postgres",
 )
+# 认证测试统一注入固定密钥；生产环境缺失该变量会在启动阶段直接报错。
+os.environ.setdefault("APP_AUTH_SECRET", "test-auth-secret")

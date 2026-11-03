@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { client } from '@/lib/api';
+import { authApi } from '@/lib/auth';
 
 export type AuthState = 'loading' | 'authenticated' | 'anonymous';
 
@@ -39,12 +40,12 @@ export function useStudioAuth() {
   }, []);
 
   const login = useCallback(() => {
-    client.auth.toLogin();
+    window.location.assign('/login');
   }, []);
 
   const logout = useCallback(async () => {
     try {
-      await client.auth.logout();
+      await authApi.logout();
     } finally {
       setUser(null);
       setState('anonymous');

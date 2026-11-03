@@ -114,7 +114,7 @@ class TestRunHtml:
     async def test_docker_unavailable_raises(self, service):
         with patch.object(ExecutionService, "is_docker_available", return_value=False):
             with pytest.raises(SandboxUnavailableError) as exc_info:
-                await service.run_html("<html></html>", version_id=1)
+                await service.run_html("<html></html>", version_id=1, user_id="unit-test-user")
         assert exc_info.value.code == error_codes.SANDBOX_DOCKER_UNAVAILABLE
 
     @pytest.mark.asyncio
@@ -125,7 +125,7 @@ class TestRunHtml:
              patch.object(ExecutionService, "_allocate_port", return_value=52341), \
              patch("services.execution.subprocess.run", return_value=_make_result(0, stdout="abc123def456")):
 
-            execution = await service.run_html("<html><body>hi</body></html>", version_id=42)
+            execution = await service.run_html("<html><body>hi</body></html>", version_id=42, user_id="unit-test-user")
 
             assert execution is not None
             assert execution.version_id == 42
@@ -152,7 +152,7 @@ class TestRunHtml:
              patch.object(ExecutionService, "_allocate_port", return_value=52341), \
              patch("services.execution.subprocess.run", side_effect=fake_run):
 
-            await service.run_html("<html></html>", version_id=1)
+            await service.run_html("<html></html>", version_id=1, user_id="unit-test-user")
 
         cmd = captured["cmd"]
         assert "--read-only" in cmd
@@ -191,7 +191,7 @@ class TestRunHtml:
              patch.object(ExecutionService, "_allocate_port", side_effect=[1111, 2222, 3333]), \
              patch("services.execution.subprocess.run", side_effect=results):
 
-            execution = await service.run_html("<html></html>", version_id=1)
+            execution = await service.run_html("<html></html>", version_id=1, user_id="unit-test-user")
             assert execution.port == 3333
 
     @pytest.mark.asyncio
@@ -204,7 +204,7 @@ class TestRunHtml:
              patch("services.execution.subprocess.run", side_effect=results):
 
             with pytest.raises(SandboxUnavailableError) as exc_info:
-                await service.run_html("<html></html>", version_id=1)
+                await service.run_html("<html></html>", version_id=1, user_id="unit-test-user")
         assert exc_info.value.code == error_codes.SANDBOX_START_FAILED
         assert "端口" in exc_info.value.details["reason"]
 
@@ -226,7 +226,7 @@ class TestRunHtml:
              patch("services.execution.subprocess.run", side_effect=fake_run):
 
             with pytest.raises(RuntimeError, match="db down"):
-                await service.run_html("<html></html>", version_id=1)
+                await service.run_html("<html></html>", version_id=1, user_id="unit-test-user")
 
         rm_commands = [cmd for cmd in commands if cmd[:3] == ["docker", "rm", "-f"]]
         assert len(rm_commands) == 1
@@ -252,7 +252,7 @@ class TestRunHtml:
              patch.object(ExecutionService, "_allocate_port", side_effect=[1111, 2222]), \
              patch("services.execution.subprocess.run", side_effect=fake_run):
 
-            execution = await service.run_html("<html></html>", version_id=1)
+            execution = await service.run_html("<html></html>", version_id=1, user_id="unit-test-user")
 
         assert execution.container_id == "cid-second"
         run_names = [cmd[cmd.index("--name") + 1] for cmd in commands if "--name" in cmd]
