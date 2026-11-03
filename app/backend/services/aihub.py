@@ -11,10 +11,10 @@ import json
 import logging
 import os
 import random
+from dataclasses import dataclass
 from pathlib import Path
-from typing import AsyncGenerator, Optional, TYPE_CHECKING
+from typing import Any, AsyncGenerator, Callable, Dict, List, Optional, Tuple, TYPE_CHECKING
 
-from core.config import settings
 from schemas.aihub import AnalyzePdfRequest, AnalyzePdfResponse
 from schemas.aihub import (
     GenAudioRequest,
@@ -84,17 +84,15 @@ DEFAULT_VOICE = {"male": "Ethan", "female": "Cherry"}
 
 
 # ==== AI 调用韧性配置（可用环境变量覆盖，避免硬编码） ====
-# 并发上限：限制同时进行的模型请求数，从源头避免瞬时洪峰触发上游并发限流（429）。
+# 默认并发上限：每家供应商未单独指定时采用该值。
 AI_MAX_CONCURRENCY = int(os.environ.get("APP_AI_MAX_CONCURRENCY", "2"))
-# 可重试错误（429/5xx/超时/连接错误）的最大重试次数。
+# 可重试错误（429/5xx/超时/连接错误）的最大重试次数（按供应商独立计数）。
 AI_MAX_RETRIES = int(os.environ.get("APP_AI_MAX_RETRIES", "4"))
 # 指数退避的基座秒数与封顶秒数。
 AI_RETRY_BASE_SECONDS = float(os.environ.get("APP_AI_RETRY_BASE", "1.0"))
 AI_RETRY_MAX_SECONDS = float(os.environ.get("APP_AI_RETRY_MAX", "30.0"))
-
-# 服务级并发信号量：AIHubService 每次调用都会新建实例，信号量须模块级共享，
-# 才能在多请求/多实例之间真正限流。
-_ai_semaphore = asyncio.Semaphore(AI_MAX_CONCURRENCY)
+# 供应商优先级：主选 → 备选 → 兜底，可用 APP_AI_PROVIDER_ORDER 调整。
+AI_PROVIDER_ORDER = os.environ.get("APP_AI_PROVIDER_ORDER", "aliyun,ark,zhipu")
 
 
 def _backoff_seconds(attempt: int) -> float:
@@ -106,23 +104,183 @@ def _backoff_seconds(attempt: int) -> float:
     return random.uniform(0, cap)
 
 
-class AIHubService:
-    """AI Hub service class that wraps AI SDK calls."""
+def _env_str(name: str, default: Optional[str] = None) -> Optional[str]:
+    value = os.environ.get(name)
+    if value is None or not value.strip():
+        return default
+    return value.strip()
 
-    def __init__(self):
-        self.client: Optional["AsyncOpenAI"] = None
-        if settings.app_ai_base_url and settings.app_ai_key:
-            from openai import AsyncOpenAI
 
-            self.client = AsyncOpenAI(
-                api_key=settings.app_ai_key,
-                base_url=settings.app_ai_base_url.rstrip("/"),
+def _env_int(name: str, default: Optional[int]) -> Optional[int]:
+    raw = os.environ.get(name)
+    if raw is None or not raw.strip():
+        return default
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        return default
+
+
+def _env_float(name: str, default: Optional[float]) -> Optional[float]:
+    raw = os.environ.get(name)
+    if raw is None or not raw.strip():
+        return default
+    try:
+        return float(raw)
+    except (TypeError, ValueError):
+        return default
+
+
+@dataclass(frozen=True)
+class ProviderConfig:
+    """单个 AI 供应商的独立配置（缺失 base_url/api_key/model 任一项则整家跳过）。"""
+
+    name: str
+    base_url: str
+    api_key: str
+    model: str
+    max_tokens: Optional[int] = None
+    max_concurrency: int = AI_MAX_CONCURRENCY
+    timeout: float = 60.0
+
+
+@dataclass(frozen=True)
+class ProviderFailure:
+    """某家供应商的一次失败记录（不含密钥，可安全落日志）。"""
+
+    provider: str
+    model: str
+    reason: str
+
+
+class AllProvidersFailedError(RuntimeError):
+    """所有供应商均失败时抛出，携带逐家的失败原因（不含密钥）。"""
+
+    def __init__(self, failures: List[ProviderFailure]):
+        self.failures = failures
+        detail = "; ".join(f"{f.provider}/{f.model}: {f.reason}" for f in failures) or "无可用供应商"
+        super().__init__(f"AI 全部供应商调用失败: {detail}")
+
+
+def _build_providers() -> List[ProviderConfig]:
+    """按优先级从环境变量构建供应商链；缺失 base_url/api_key/model 的整家跳过。"""
+    order = os.environ.get("APP_AI_PROVIDER_ORDER", AI_PROVIDER_ORDER)
+    wanted = [item.strip().lower() for item in order.split(",") if item.strip()]
+    providers: List[ProviderConfig] = []
+    for name in wanted:
+        if name == "aliyun":
+            prefix = "APP_AI_ALIYUN"
+            # 默认北京站；国际/新加坡站为 https://dashscope-intl.aliyuncs.com/compatible-mode/v1
+            base_url = _env_str(f"{prefix}_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1")
+            api_key = _env_str(f"{prefix}_API_KEY")
+            model = _env_str(f"{prefix}_MODEL", "qwen3.8-flash")
+        elif name == "ark":
+            prefix = "APP_AI_ARK"
+            # 默认北京站 v3；方舟 model 填推理接入点 ID（ep-xxx）或模型 ID，无默认值。
+            base_url = _env_str(f"{prefix}_BASE_URL", "https://ark.cn-beijing.volces.com/api/v3")
+            api_key = _env_str(f"{prefix}_API_KEY")
+            model = _env_str(f"{prefix}_MODEL")
+        elif name == "zhipu":
+            prefix = "APP_AI_ZHIPU"
+            # 兜底：兼容历史单一配置 APP_AI_BASE_URL / APP_AI_KEY。
+            base_url = _env_str(f"{prefix}_BASE_URL") or _env_str("APP_AI_BASE_URL")
+            api_key = _env_str(f"{prefix}_API_KEY") or _env_str("APP_AI_KEY")
+            model = _env_str(f"{prefix}_MODEL", "glm-4.7-flash")
+        else:
+            logger.warning("未知 AI 供应商 %s，已忽略", name)
+            continue
+
+        if not base_url or not api_key or not model:
+            continue
+
+        providers.append(
+            ProviderConfig(
+                name=name,
+                base_url=base_url.rstrip("/"),
+                api_key=api_key,
+                model=model,
+                max_tokens=_env_int(f"{prefix}_MAX_TOKENS", None),
+                max_concurrency=_env_int(f"{prefix}_MAX_CONCURRENCY", AI_MAX_CONCURRENCY) or AI_MAX_CONCURRENCY,
+                timeout=_env_float(f"{prefix}_TIMEOUT", 60.0) or 60.0,
             )
+        )
+    return providers
+
+
+def has_configured_provider() -> bool:
+    """是否至少配置了一家可用供应商（任一供应商配置完整即视为已启用）。"""
+    return bool(_build_providers())
+
+
+def configured_provider_names() -> List[str]:
+    """当前可用供应商名称列表（用于诊断，不含密钥）。"""
+    return [p.name for p in _build_providers()]
+
+
+# 每家供应商独立并发信号量；按事件循环缓存，避免跨 loop 复用导致挂起。
+_semaphores: Dict[str, Tuple[asyncio.AbstractEventLoop, asyncio.Semaphore]] = {}
+
+
+def _get_semaphore(provider: ProviderConfig) -> asyncio.Semaphore:
+    loop = asyncio.get_running_loop()
+    cached = _semaphores.get(provider.name)
+    if cached is not None and cached[0] is loop:
+        return cached[1]
+    semaphore = asyncio.Semaphore(provider.max_concurrency)
+    _semaphores[provider.name] = (loop, semaphore)
+    return semaphore
+
+
+def _retryable_exceptions() -> tuple:
+    from openai import APIConnectionError, APITimeoutError, InternalServerError, RateLimitError
+
+    return (RateLimitError, InternalServerError, APITimeoutError, APIConnectionError)
+
+
+def _provider_errors() -> tuple:
+    """任一供应商的 API 错误（含 401/403/404/400），用于降级判定；非瞬时错误不重试。"""
+    from openai import APIError
+
+    return (APIError,)
+
+
+class AIHubService:
+    """AI Hub service class that wraps AI SDK calls.
+
+    文本生成（gentxt / gentxt_stream）走多供应商主备降级链（阿里百炼 → 火山方舟 → 智谱）；
+    其余多模态能力（图片/视频/音频/转写/PDF）沿用首个可用供应商的客户端。
+    """
+
+    def __init__(
+        self,
+        providers: Optional[List[ProviderConfig]] = None,
+        client_factory: Optional[Callable[[ProviderConfig], "AsyncOpenAI"]] = None,
+    ):
+        self.providers: List[ProviderConfig] = providers if providers is not None else _build_providers()
+        self._client_factory = client_factory or self._make_client
+        self._clients: Dict[str, "AsyncOpenAI"] = {}
+        self.client: Optional["AsyncOpenAI"] = self._client_for(self.providers[0]) if self.providers else None
+
+    @staticmethod
+    def _make_client(provider: ProviderConfig) -> "AsyncOpenAI":
+        from openai import AsyncOpenAI
+
+        return AsyncOpenAI(api_key=provider.api_key, base_url=provider.base_url, timeout=provider.timeout)
+
+    def _client_for(self, provider: ProviderConfig) -> "AsyncOpenAI":
+        client = self._clients.get(provider.name)
+        if client is None:
+            client = self._client_factory(provider)
+            self._clients[provider.name] = client
+        return client
 
     def _require_ai_client(self) -> "AsyncOpenAI":
-        """Return the configured AI client or raise a configuration error."""
+        """Return the primary provider client or raise a configuration error."""
         if not self.client:
-            raise ValueError("AI service not configured. Set APP_AI_BASE_URL and APP_AI_KEY.")
+            raise ValueError(
+                "AI service not configured. Set APP_AI_ALIYUN_API_KEY / APP_AI_ARK_API_KEY, "
+                "or APP_AI_BASE_URL + APP_AI_KEY (or APP_AI_ZHIPU_API_KEY)."
+            )
         return self.client
 
     def _convert_message(self, msg) -> dict:
@@ -133,56 +291,66 @@ class AIHubService:
             content = [item.model_dump() if hasattr(item, "model_dump") else item for item in content]
         return {"role": msg.role, "content": content}
 
-    async def _create_chat_completion(self, request: GenTxtRequest, *, stream: bool):
-        """发起 chat.completions.create，带并发限流与指数退避重试。
-
-        429 限流、5xx、超时、连接错误均按指数退避 + 抖动重试；所有请求经模块级
-        信号量限流，从源头避免瞬时洪峰触发上游并发限流。
-        """
-        from openai import APIConnectionError, APITimeoutError, InternalServerError, RateLimitError
-
-        retryable = (RateLimitError, InternalServerError, APITimeoutError, APIConnectionError)
-        client = self._require_ai_client()
+    async def _call_provider(self, provider: ProviderConfig, request: GenTxtRequest, *, stream: bool):
+        """向单家供应商发起请求，按该供应商独立计数做指数退避重试。"""
+        retryable = _retryable_exceptions()
+        client = self._client_for(provider)
         messages = [self._convert_message(msg) for msg in request.messages]
+        model = provider.model
+        max_tokens = provider.max_tokens if provider.max_tokens is not None else request.max_tokens
 
-        async with _ai_semaphore:
-            attempt = 0
-            while True:
-                try:
+        attempt = 0
+        while True:
+            try:
+                async with _get_semaphore(provider):
                     return await observe_external_http(
                         client.chat.completions.create(
-                            model=request.model,
+                            model=model,
                             messages=messages,
                             temperature=request.temperature,
-                            max_tokens=request.max_tokens,
+                            max_tokens=max_tokens,
                             stream=stream,
                         )
                     )
-                except retryable as exc:
-                    if attempt >= AI_MAX_RETRIES:
-                        raise
-                    delay = _backoff_seconds(attempt)
-                    logger.warning(
-                        "AI 调用遇到可重试错误 %s，第 %d/%d 次退避重试，等待 %.2f 秒",
-                        type(exc).__name__, attempt + 1, AI_MAX_RETRIES, delay,
-                    )
-                    await asyncio.sleep(delay)
-                    attempt += 1
+            except retryable as exc:
+                if attempt >= AI_MAX_RETRIES:
+                    raise
+                delay = _backoff_seconds(attempt)
+                logger.warning(
+                    "AI 供应商 %s 遇到可重试错误 %s，第 %d/%d 次退避重试，等待 %.2f 秒",
+                    provider.name, type(exc).__name__, attempt + 1, AI_MAX_RETRIES, delay,
+                )
+                await asyncio.sleep(delay)
+                attempt += 1
 
     async def gentxt(self, request: GenTxtRequest) -> GenTxtResponse:
         """
         Generate Text API (non-streaming), supports text and image input.
 
+        按主备顺序调用供应商：429/5xx/超时/连接错误/空响应逐级降级；
+        全部失败时抛出 AllProvidersFailedError（携带逐家供应商与失败原因）。
+
         Args:
             request: Generate text request parameters.
 
         Returns:
-            Txt2TxtResponse: generated text response.
+            GenTxtResponse: generated text response.
         """
-        try:
-            response = await self._create_chat_completion(request, stream=False)
+        failures: List[ProviderFailure] = []
+        for provider in self.providers:
+            try:
+                response = await self._call_provider(provider, request, stream=False)
+            except _provider_errors() as exc:
+                failures.append(ProviderFailure(provider.name, provider.model, f"{type(exc).__name__}: {exc}"))
+                logger.warning("AI 供应商 %s 调用失败，降级到下一家：%s", provider.name, type(exc).__name__)
+                continue
 
             content = response.choices[0].message.content or ""
+            if not content.strip():
+                failures.append(ProviderFailure(provider.name, provider.model, "empty response"))
+                logger.warning("AI 供应商 %s 返回空响应，降级到下一家", provider.name)
+                continue
+
             usage = None
             if response.usage:
                 usage = {
@@ -191,19 +359,17 @@ class AIHubService:
                     "total_tokens": response.usage.total_tokens,
                 }
 
-            return GenTxtResponse(
-                content=content,
-                model=request.model,
-                usage=usage,
-            )
+            return GenTxtResponse(content=content, model=provider.model, usage=usage)
 
-        except Exception as e:
-            logger.error(f"gentxt error: {e}")
-            raise
+        logger.error("AI 全部供应商失败: %s", "; ".join(f"{f.provider}: {f.reason}" for f in failures))
+        raise AllProvidersFailedError(failures)
 
     async def gentxt_stream(self, request: GenTxtRequest) -> AsyncGenerator[str, None]:
         """
         Generate Text API (streaming), supports text and image input.
+
+        建流阶段失败（429/5xx/超时/连接）或整条流无内容时降级到下一家；
+        一旦已产出内容后中途失败，则不再降级、直接抛出（避免内容重复/错乱）。
 
         Args:
             request: Generate text request parameters.
@@ -211,16 +377,41 @@ class AIHubService:
         Yields:
             str: Generated text content chunk (plain text, not JSON).
         """
-        try:
-            stream = await self._create_chat_completion(request, stream=True)
+        failures: List[ProviderFailure] = []
+        provider_errors = _provider_errors()
 
-            async for chunk in stream:
-                if chunk.choices and chunk.choices[0].delta.content:
-                    yield chunk.choices[0].delta.content
+        for provider in self.providers:
+            try:
+                stream = await self._call_provider(provider, request, stream=True)
+            except provider_errors as exc:
+                failures.append(ProviderFailure(provider.name, provider.model, f"{type(exc).__name__}: {exc}"))
+                logger.warning("AI 供应商 %s 建流失败，降级到下一家：%s", provider.name, type(exc).__name__)
+                continue
 
-        except Exception as e:
-            logger.error(f"gentxt_stream error: {e}")
-            raise
+            produced = False
+            try:
+                async for chunk in stream:
+                    if chunk.choices and chunk.choices[0].delta.content:
+                        produced = True
+                        yield chunk.choices[0].delta.content
+            except provider_errors as exc:
+                if produced:
+                    logger.error(
+                        "AI 供应商 %s 流式中途失败（已输出内容，不再降级）：%s", provider.name, type(exc).__name__
+                    )
+                    raise
+                failures.append(ProviderFailure(provider.name, provider.model, f"{type(exc).__name__}: {exc}"))
+                logger.warning("AI 供应商 %s 流式失败且尚无输出，降级到下一家", provider.name)
+                continue
+
+            if produced:
+                return
+
+            failures.append(ProviderFailure(provider.name, provider.model, "empty stream"))
+            logger.warning("AI 供应商 %s 返回空流，降级到下一家", provider.name)
+
+        logger.error("AI 全部供应商流式失败: %s", "; ".join(f"{f.provider}: {f.reason}" for f in failures))
+        raise AllProvidersFailedError(failures)
 
     @staticmethod
     def _extract_image_ref(item: object) -> str:

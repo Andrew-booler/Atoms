@@ -1,17 +1,18 @@
 """确定性输出边界。
 
 默认返回示例驱动的预置输出（见 studio_examples），真实提供者须显式注入
-或通过环境变量（APP_AI_BASE_URL + APP_AI_KEY）启用。三个阶段（plan/outline/artifact）
-保持同一响应形状，前端与存储层无需感知底层是 mock 还是真实模型。
+或通过环境变量启用（任一 AI 供应商配置完整即可，见 services.aihub._build_providers）。
+三个阶段（plan/outline/artifact）保持同一响应形状，前端与存储层无需感知底层是
+mock 还是真实模型。
 
 真实模式下，若用户输入命中示例文本（见 studio_examples.match_example），
 则短路返回对应示范网页，不调用真实模型，保证首体验稳定。
 """
 
-import os
 from copy import deepcopy
 from typing import Optional, Protocol
 
+from services import aihub
 from services import studio_ai
 from services.studio_examples import fixture as example_fixture
 from services.studio_examples import match_example
@@ -23,8 +24,8 @@ DEFAULT_PROFILE = "balanced"
 
 
 def _ai_enabled() -> bool:
-    """真实 AI 是否已配置：同时存在 APP_AI_BASE_URL 与 APP_AI_KEY 才启用。"""
-    return bool(os.environ.get("APP_AI_BASE_URL")) and bool(os.environ.get("APP_AI_KEY"))
+    """真实 AI 是否已配置：任一供应商（aliyun/ark/zhipu）配置完整即启用。"""
+    return aihub.has_configured_provider()
 
 
 class OutputProvider(Protocol):  # pragma: no cover - 类型协议，无运行时逻辑

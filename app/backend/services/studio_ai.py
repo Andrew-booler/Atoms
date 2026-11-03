@@ -22,19 +22,19 @@ DEFAULT_PROFILE = "balanced"
 
 MODEL_PROFILES: Dict[str, Dict[str, str]] = {
     "balanced": {
-        "id": "glm-4.7-flash",
+        "id": "qwen3.8-flash",
         "label": "Balanced",
-        "hint": "GLM-4.7-Flash，速度与效果均衡（免费）",
+        "hint": "阿里百炼 Qwen3.8-Flash，主选（失败自动降级到方舟/智谱）",
     },
     "fast": {
-        "id": "glm-4.7-flash",
+        "id": "qwen3.8-flash",
         "label": "Fast",
-        "hint": "GLM-4.7-Flash，轻量快速（免费）",
+        "hint": "阿里百炼 Qwen3.8-Flash，轻量快速（失败自动降级）",
     },
     "quality": {
-        "id": "glm-4.7-flash",
+        "id": "qwen3.8-flash",
         "label": "Quality",
-        "hint": "GLM-4.7-Flash，长上下文还原（免费）",
+        "hint": "阿里百炼 Qwen3.8-Flash，长上下文还原（失败自动降级）",
     },
 }
 
