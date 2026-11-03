@@ -89,6 +89,9 @@ class ExecutionService:
 
     def __init__(self, db: AsyncSession):
         self.db = db
+        #: 最近一次成功启动的摘要（stdout/stderr、工作区文件清单、端口与预览 URL），
+        #: 供构建终端写事件使用；不改变 run_html 的返回类型。
+        self.last_run_details: Optional[dict] = None
 
     # ── 配置 ──────────────────────────────────────────────
     @property
@@ -327,6 +330,19 @@ class ExecutionService:
             container_id = result.stdout.strip()
             preview_url = f"http://{self.sandbox_host}:{port}/"
             expires_at = datetime.now(timezone.utc) + timedelta(seconds=self.idle_timeout)
+
+            self.last_run_details = {
+                "stdout": (result.stdout or "").strip()[:400],
+                "stderr": (result.stderr or "").strip()[:400],
+                # 只给文件名与字节数，绝不输出页面正文。
+                "files": [
+                    {"name": entry.name, "bytes": entry.stat().st_size}
+                    for entry in sorted(workspace.iterdir())
+                    if entry.is_file()
+                ],
+                "port": port,
+                "preview_url": preview_url,
+            }
 
             execution = Execution(
                 user_id=user_id,

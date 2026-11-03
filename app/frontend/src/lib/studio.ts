@@ -1,6 +1,20 @@
 import { client } from './api';
+import type { BuildEvent } from './build-stream';
 
 export type Stage = 'plan' | 'outline' | 'artifact';
+
+/** 构建终端：一次构建的事件集合（刷新后可回看）。 */
+export interface BuildStartResponse {
+  build_id: string;
+}
+
+export interface BuildEventsResponse {
+  build_id?: string | null;
+  events: BuildEvent[];
+}
+
+const withBuildId = (url: string, buildId?: string) =>
+  buildId ? `${url}?build_id=${encodeURIComponent(buildId)}` : url;
 
 export interface ModelOption {
   key: string;
@@ -197,10 +211,11 @@ export const studioApi = {
   async plan(
     projectId: number,
     requirement: string,
-    profile?: string
+    profile?: string,
+    buildId?: string
   ): Promise<PlanResponse> {
     const res = await client.apiCall.invoke({
-      url: `/api/v1/studio/projects/${projectId}/plan`,
+      url: withBuildId(`/api/v1/studio/projects/${projectId}/plan`, buildId),
       method: 'POST',
       data: { requirement, profile },
       options: { timeout: 600_000 },
@@ -212,10 +227,11 @@ export const studioApi = {
     projectId: number,
     requirement: string,
     planSummary: string,
-    profile?: string
+    profile?: string,
+    buildId?: string
   ): Promise<OutlineResponse> {
     const res = await client.apiCall.invoke({
-      url: `/api/v1/studio/projects/${projectId}/outline`,
+      url: withBuildId(`/api/v1/studio/projects/${projectId}/outline`, buildId),
       method: 'POST',
       data: { requirement, plan_summary: planSummary, profile },
       options: { timeout: 600_000 },
@@ -232,10 +248,11 @@ export const studioApi = {
       profile?: string;
       base_version_id?: number;
       revision_note?: string;
-    }
+    },
+    buildId?: string
   ): Promise<BuildResponse> {
     const res = await client.apiCall.invoke({
-      url: `/api/v1/studio/projects/${projectId}/artifact`,
+      url: withBuildId(`/api/v1/studio/projects/${projectId}/artifact`, buildId),
       method: 'POST',
       data: payload,
       options: { timeout: 600_000 },
@@ -245,15 +262,36 @@ export const studioApi = {
 
   async editArtifact(
     projectId: number,
-    payload: { html: string; note?: string }
+    payload: { html: string; note?: string },
+    buildId?: string
   ): Promise<BuildResponse> {
     const res = await client.apiCall.invoke({
-      url: `/api/v1/studio/projects/${projectId}/artifact/edit`,
+      url: withBuildId(`/api/v1/studio/projects/${projectId}/artifact/edit`, buildId),
       method: 'POST',
       data: payload,
       options: { timeout: 600_000 },
     });
     return res.data as BuildResponse;
+  },
+
+  /** 为一次完整的 plan→outline→artifact 构建开启终端会话。 */
+  async startBuild(projectId: number): Promise<BuildStartResponse> {
+    const res = await client.apiCall.invoke({
+      url: `/api/v1/studio/projects/${projectId}/builds`,
+      method: 'POST',
+      data: {},
+    });
+    return res.data as BuildStartResponse;
+  },
+
+  /** 刷新页面后回看最近一次构建记录（无记录时 events 为空）。 */
+  async latestBuild(projectId: number): Promise<BuildEventsResponse> {
+    const res = await client.apiCall.invoke({
+      url: `/api/v1/studio/projects/${projectId}/builds/latest`,
+      method: 'GET',
+      data: {},
+    });
+    return res.data as BuildEventsResponse;
   },
 
   async getVersion(versionId: number): Promise<VersionDetail> {

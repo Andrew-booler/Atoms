@@ -47,11 +47,10 @@ async def get_bearer_token(
     raise AuthError(error_codes.AUTH_REQUIRED)
 
 
-async def get_current_user(
-    token: str = Depends(get_bearer_token),
-    db: AsyncSession = Depends(get_db),
-) -> UserResponse:
-    """必需登录：令牌无效 401，过期返回 AUTH_TOKEN_EXPIRED。"""
+async def _authenticate(token: str, db: AsyncSession) -> UserResponse:
+    """校验令牌并确认用户仍存在；细节错误码保持一致。"""
+    if not token.strip():
+        raise AuthError(error_codes.AUTH_REQUIRED)
     try:
         payload = decode_access_token(token)
     except AuthConfigurationError:
@@ -66,6 +65,29 @@ async def get_current_user(
     if not user_id:
         raise AuthError(error_codes.AUTH_INVALID_TOKEN)
     return _user_response(await _load_user(db, str(user_id)))
+
+
+async def get_current_user(
+    token: str = Depends(get_bearer_token),
+    db: AsyncSession = Depends(get_db),
+) -> UserResponse:
+    """必需登录：令牌无效 401，过期返回 AUTH_TOKEN_EXPIRED。"""
+    return await _authenticate(token, db)
+
+
+async def get_stream_user(
+    request: Request,
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(bearer_scheme),
+    db: AsyncSession = Depends(get_db),
+) -> UserResponse:
+    """SSE 场景：优先 Authorization 头，浏览器原生 EventSource 可用 access_token 查询参数。
+
+    校验逻辑与 get_current_user 完全相同，不引入新的令牌类型。
+    """
+    token = credentials.credentials if credentials and credentials.scheme.lower() == "bearer" else ""
+    if not token:
+        token = (request.query_params.get("access_token") or "").strip()
+    return await _authenticate(token, db)
 
 
 async def get_admin_user(current_user: UserResponse = Depends(get_current_user)) -> UserResponse:

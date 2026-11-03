@@ -15,6 +15,7 @@ from typing import Any, Dict, List, Optional
 from core import error_codes
 from core.exceptions import ProviderError
 from schemas.aihub import ChatMessage, GenTxtRequest
+from services import ai_usage
 from services.aihub import AIHubService, AI_MAX_RETRIES, _backoff_seconds, _env_bool, _env_int
 
 #: 各阶段结构化输出失败时使用的错误码：(通用失败, 内容无效)。
@@ -168,6 +169,8 @@ async def _gentxt(
     # 免费模型偶发返回空响应，视为瞬时失败并按指数退避重试。
     for attempt in range(AI_MAX_RETRIES + 1):
         response = await service.gentxt(request)
+        # 阶段级 token 用量：模拟提供者没有 usage 时不会累加，最终为 None。
+        ai_usage.record_usage(getattr(response, "usage", None))
         content = (response.content or "").strip()
         if content:
             return content

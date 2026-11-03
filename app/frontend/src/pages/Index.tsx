@@ -3,9 +3,11 @@ import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ArtifactEditor } from '@/components/studio/ArtifactEditor';
 import { ArtifactPreview } from '@/components/studio/ArtifactPreview';
+import { BuildTerminal } from '@/components/studio/BuildTerminal';
 import { ConversationStream } from '@/components/studio/ConversationStream';
 import { ProjectRail } from '@/components/studio/ProjectRail';
 import { RequirementComposer } from '@/components/studio/RequirementComposer';
+import { useBuildTerminal } from '@/hooks/useBuildTerminal';
 import { StudioOperation } from '@/lib/studio-operation';
 import { describeError, studioApi, type BuildResponse, type ModelOption, type OutlinePayload, type PlanPayload, type ProjectDetail, type ProjectSummary, type StudioMessage, type VersionSummary } from '@/lib/studio';
 import { cn } from '@/lib/utils';
@@ -35,6 +37,7 @@ export default function StudioPage() {
   const [mobileTab, setMobileTab] = useState<'chat' | 'preview'>('chat');
   const [drawer, setDrawer] = useState(false);
   const operation = useMemo(() => new StudioOperation(setBusy, setError, describeError), []);
+  const terminal = useBuildTerminal();
 
   const updateSummary = (project: ProjectSummary) => {
     setActiveProject(project);
@@ -66,10 +69,15 @@ export default function StudioPage() {
     if (operation.busy) return;
     setActiveProject(null); setMessages([]); setVersions([]); setArtifactHtml(null); setPreviewUrl(null);
     setActiveVersion(null); setError(null); setMobileTab('chat'); setDrawer(false);
+    terminal.reset();
   };
   const openProject = (project: ProjectSummary) => operation.run(async () => {
     setStageLabel('正在读取项目…');
-    try { applyDetail(await studioApi.getProject(project.id)); setDrawer(false); }
+    try {
+      applyDetail(await studioApi.getProject(project.id));
+      setDrawer(false);
+      void terminal.loadLatest(project.id);
+    }
     finally { setStageLabel(''); }
   });
   const removeProject = (project: ProjectSummary) => operation.run(async () => {
@@ -79,6 +87,7 @@ export default function StudioPage() {
       setProjects(previous => previous.filter(item => item.id !== project.id));
       if (activeProject?.id === project.id) {
         setActiveProject(null); setMessages([]); setVersions([]); setArtifactHtml(null); setPreviewUrl(null); setActiveVersion(null);
+        terminal.reset();
       }
     } finally { setStageLabel(''); }
   });
@@ -121,7 +130,9 @@ export default function StudioPage() {
           setMessages(previous => [...previous.filter(item => item.id !== savedMessage!.id), savedMessage!]);
           setRequirement('');
         }
-        await studioApi.plan(project.id, text, selectedProfile);
+        const buildId = await terminal.begin(project.id);
+        terminal.watch(project.id, buildId);
+        await studioApi.plan(project.id, text, selectedProfile, buildId);
         applyDetail(await studioApi.getProject(project.id));
       } finally { setStageLabel(''); }
     });
@@ -139,10 +150,12 @@ export default function StudioPage() {
       setBuilding(true); setRunningPlan(message.id);
       try {
         if (!built) {
+          const buildId = await terminal.begin(projectId);
+          terminal.watch(projectId, buildId);
           setStageLabel('正在取得模拟页面结构…');
-          if (!outline) outline = (await studioApi.outline(projectId, req, planToText(plan), selectedProfile)).outline;
+          if (!outline) outline = (await studioApi.outline(projectId, req, planToText(plan), selectedProfile, buildId)).outline;
           setStageLabel('正在保存模拟HTML与版本…');
-          built = await studioApi.artifact(projectId, { requirement: req, plan_summary: planToText(plan), outline, profile: selectedProfile });
+          built = await studioApi.artifact(projectId, { requirement: req, plan_summary: planToText(plan), outline, profile: selectedProfile }, buildId);
         }
         updateSummary(built.project);
         setArtifactHtml(built.artifact_html); setPreviewUrl(built.preview_url ?? null); setActiveVersion(built.version.version_no);
@@ -193,8 +206,10 @@ export default function StudioPage() {
       setBuilding(true);
       try {
         if (!built) {
+          const buildId = await terminal.begin(projectId);
+          terminal.watch(projectId, buildId);
           setStageLabel('正在根据修改意见生成新版本…');
-          if (!outline) outline = (await studioApi.outline(projectId, note, '', selectedProfile)).outline;
+          if (!outline) outline = (await studioApi.outline(projectId, note, '', selectedProfile, buildId)).outline;
           built = await studioApi.artifact(projectId, {
             requirement: note,
             plan_summary: '',
@@ -202,7 +217,7 @@ export default function StudioPage() {
             profile: selectedProfile,
             base_version_id: baseVersion.id,
             revision_note: note,
-          });
+          }, buildId);
         }
         updateSummary(built.project);
         setArtifactHtml(built.artifact_html); setPreviewUrl(built.preview_url ?? null); setActiveVersion(built.version.version_no);
@@ -219,8 +234,10 @@ export default function StudioPage() {
     void operation.run(async () => {
       setBuilding(true);
       try {
+        const buildId = await terminal.begin(projectId);
+        terminal.watch(projectId, buildId);
         setStageLabel('正在保存编辑并重跑预览…');
-        const built = await studioApi.editArtifact(projectId, { html, note });
+        const built = await studioApi.editArtifact(projectId, { html, note }, buildId);
         updateSummary(built.project);
         setArtifactHtml(built.artifact_html);
         setPreviewUrl(built.preview_url ?? null);
@@ -247,6 +264,7 @@ export default function StudioPage() {
       <div className="flex min-h-0 flex-1">
         <section aria-label="需求对话" className={cn('flex min-h-0 w-full flex-col lg:w-[46%] lg:border-r lg:border-line', mobileTab === 'preview' && 'hidden lg:flex')}>
           {messages.length === 0 && !busy && !error ? <div className="flex flex-1 flex-col justify-center px-6"><h2 className="text-[22px] font-semibold text-ink">描述需求，先看计划，<br />确认后查看固定预览。</h2><p className="mt-3 text-sm leading-7 text-ink-soft">本阶段使用预置模拟计划、结构和HTML，不调用真实模型。每次成功构建保存为独立历史版本。</p></div> : <ConversationStream messages={messages} planState={building ? 'running' : hasPendingPlan ? 'pending' : 'done'} runningPlanId={runningPlan} onApprove={approvePlan} onRevise={revisePlan} onRetry={operation.canRetry ? () => void operation.retry() : undefined} busy={busy} error={error} buildStage={stageLabel} onCopy={action => operation.run(action)} />}
+          <BuildTerminal events={terminal.events} running={terminal.running} error={terminal.error} />
           {activeProject && activeVersion != null && (
             <div className="border-t border-line bg-paper px-4 py-2">
               <div className="mx-auto flex w-full max-w-[720px] items-center gap-2">

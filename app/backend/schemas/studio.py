@@ -139,3 +139,21 @@ class ExecutionResponse(BaseModel):
 
 class RestoreRequest(BaseModel):
     version_id: int
+
+
+class BuildStartResponse(BaseModel):
+    build_id: str
+
+
+class BuildEventOut(BaseModel):
+    seq: int
+    type: str
+    stage: Optional[str] = None
+    message: Optional[str] = None
+    data: Dict[str, Any] = {}
+    created_at: Optional[datetime] = None
+
+
+class BuildEventsResponse(BaseModel):
+    build_id: Optional[str] = None
+    events: List[BuildEventOut] = []
