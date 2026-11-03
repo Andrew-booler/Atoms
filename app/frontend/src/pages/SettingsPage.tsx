@@ -1,6 +1,7 @@
 import { ArrowLeft } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { AiConfigPanel } from '@/components/settings/AiConfigPanel';
+import { AiUsagePanel } from '@/components/settings/AiUsagePanel';
 
 export default function SettingsPage() {
   const navigate = useNavigate();
@@ -38,6 +39,10 @@ export default function SettingsPage() {
           <p className="mt-4 text-[12px] leading-[1.6] text-ink-faint">
             密钥在服务端加密保存，界面只展示掩码；清除配置后立即回退系统默认供应商。
           </p>
+
+          <div className="mt-10">
+            <AiUsagePanel />
+          </div>
         </div>
       </main>
     </div>

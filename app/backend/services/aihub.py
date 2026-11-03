@@ -446,9 +446,12 @@ class AIHubService:
 
             usage = None
             if response.usage:
+                details = getattr(response.usage, "completion_tokens_details", None)
                 usage = {
+                    "provider": provider.name,
                     "prompt_tokens": response.usage.prompt_tokens,
                     "completion_tokens": response.usage.completion_tokens,
+                    "reasoning_tokens": getattr(details, "reasoning_tokens", None),
                     "total_tokens": response.usage.total_tokens,
                 }
 

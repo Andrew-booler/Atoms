@@ -95,8 +95,14 @@ async def test_build_events_are_persisted_in_order(client):
     plan_finished = events[2]
     assert plan_finished["stage"] == "plan"
     assert isinstance(plan_finished["data"]["duration_ms"], int)
-    # mock 提供者没有 usage 字段，阶段用量应为 None（真实调用时才可能有值）。
-    assert plan_finished["data"]["usage"] is None
+    # mock 提供者没有 usage 字段：显式记录一次调用，但所有 token 为 None。
+    usage = plan_finished["data"]["usage"]
+    assert usage["calls"] == 1
+    assert usage["prompt_tokens"] is None
+    assert usage["completion_tokens"] is None
+    assert usage["reasoning_tokens"] is None
+    assert usage["total_tokens"] is None
+    assert usage["entries"][0]["provider"] == "mock"
 
     created = events[7]
     assert created["data"]["name"] == "index.html"

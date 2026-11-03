@@ -42,7 +42,7 @@
 | P3 | 请求体大小限制缺失（`artifact_html` 无上限） | 项目说明 §二；本文件 NFR P0 | **已解决**（2026-11-04，413 `PAYLOAD_TOO_LARGE`） | 横切 P0，已实施 |
 | P4 | CORS 未收紧（`allow_origin_regex=".*"` + 凭据） | 项目说明 §二；本文件 NFR P0 | **已解决**（2026-11-04，环境变量白名单） | 横切 P0，已实施 |
 | P5 | AI 密钥轮换缺失 | 项目说明 §二；本文件 NFR P1「密钥管理」 | 待解决 | 横切 P1，Phase 16 或 Phase 5 前 |
-| P6 | AI token 用量与成本追踪缺失 | 项目说明 §二 | 待解决 | Phase 9「成本控制」 |
+| P6 | AI token 用量与成本追踪缺失 | 项目说明 §二 | **部分解决**（2026-11-04，应用内用量落库+聚合+设置页展示；配额/计费未做） | Phase 9a「成本追踪」 |
 | P7 | CI 流水线缺失（无 `.github/workflows`） | 项目说明 §二；本文件「代码质量门禁」P1 | 待解决 | 横切 P0/P1，先建骨架 |
 | P8 | 后端 lint/format 缺失（无 ruff/black 配置） | 项目说明 §二；门禁 P0 | **已解决**（2026-11-04，`pyproject.toml` ruff 配置） | 横切 P0，已实施 |
 | P9 | 后端类型检查缺失（无 mypy 配置） | 项目说明 §二；门禁 P1 | 待解决 | 横切 P1，Phase 5 前 |
@@ -489,6 +489,14 @@ Phase 17 ── 登录/会话 + 多用户数据隔离 + 越权访问控制
   - 自定义域名与证书管理（自动续期）。
   - 版本回滚与数据迁移策略（数据库是否同步回滚）。
   - **是否需要现在决定：不需要。** 托管方案强依赖部署环境、预算和运维能力，Phase 1-7 不涉及。到 Phase 9 启动时再评估。
+
+**Phase 9a：成本追踪（2026-11-04 已实施）**
+
+- 每次 AI 调用按 `user_id` / `build_id` / `stage` / `provider` / `prompt_tokens` / `completion_tokens` / `reasoning_tokens` 落库（`ai_usage_records`，迁移 `f6a7b8c9d0e1`）；模拟输出记 NULL，不伪造数字。
+- `GET /api/v1/user/ai-usage` 返回今日 / 近 7 天 / 累计用量、provider 分布与最近一次构建用量；要求登录且按 `user_id` 隔离。
+- 设置页新增「AI 用量」区块；无数据显示「暂无数据」，有调用但无 usage 显示「token 未统计」。
+- 与免费额度台账 [AI 额度使用记录](AI额度使用记录.md) 的口径关系见该文「与产品内统计的关系」。
+- **暂缓部分（Phase 9b）**：公开 URL、自定义域名、回滚等发布能力随 Phase 8 暂缓，不在本轮范围。
 
 ### Phase 10：构建终端与实时反馈
 参考 Atoms App Viewer 旁的 Terminal 面板：

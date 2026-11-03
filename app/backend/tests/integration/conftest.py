@@ -23,7 +23,7 @@ from core.auth import create_access_token  # noqa: E402
 from core.database import get_db  # noqa: E402
 from core.exception_handlers import register_exception_handlers  # noqa: E402
 from core.middleware import configure_app_middlewares  # noqa: E402
-from routers import auth, health, user_ai  # noqa: E402
+from routers import auth, health, user_ai, user_usage  # noqa: E402
 from routers import settings as settings_router  # noqa: E402
 from testing import studio_app as host  # noqa: E402
 
@@ -50,6 +50,7 @@ def _api_app() -> FastAPI:
     app.include_router(health.router)
     app.include_router(settings_router.router)
     app.include_router(user_ai.router)
+    app.include_router(user_usage.router)
     register_exception_handlers(app)
     return app
 

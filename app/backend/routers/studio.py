@@ -50,7 +50,7 @@ from schemas.studio import (
     VersionDetail,
     VersionSummary,
 )
-from services import ai_usage, user_ai_config
+from services import ai_usage, ai_usage_store, user_ai_config
 from services import build_events as build_log
 from services import studio_output as studio_ai
 from services.aihub import AllProvidersFailedError
@@ -262,14 +262,54 @@ async def _emit_event(
                 pass
 
 
+def _usage_ctx(db: AsyncSession, *, user_id: str, build_id: Optional[str]) -> Dict[str, Any]:
+    """用量落库上下文：即使没有 build_id 也要记录到该用户名下。"""
+    return {"db": db, "user_id": user_id, "build_id": build_id}
+
+
+async def _persist_usage(
+    ctx: Optional[Dict[str, Any]], stage: str, entries: List[Dict[str, Any]]
+) -> None:
+    """把阶段内每次调用落库；观测失败只记日志，不影响构建主流程。"""
+    if not ctx or not entries:
+        return
+    try:
+        await ai_usage_store.save_calls(
+            ctx["db"],
+            user_id=ctx["user_id"],
+            build_id=ctx.get("build_id"),
+            stage=stage,
+            entries=entries,
+        )
+        await ctx["db"].commit()
+    except Exception:  # noqa: BLE001 - 用量统计失败不影响业务
+        logger.warning("写入 AI 用量失败：%s", stage, exc_info=True)
+        rollback = getattr(ctx["db"], "rollback", None)
+        if rollback is not None:
+            try:
+                await rollback()
+            except Exception:  # noqa: BLE001
+                pass
+
+
 class _BuildStage:
     """阶段记录器：进入时发 stage_started，退出时发 stage_finished 或 error。
 
-    ctx 为 None（未传 build_id）时全部为空操作。
+    ctx 为 None（未传 build_id）时全部为空操作；usage_ctx 始终存在，
+    因此即使没有终端会话也能记录本次调用用量。
     """
 
-    def __init__(self, ctx: Optional[Dict[str, Any]], stage: str, start: str, finish: str):
+    def __init__(
+        self,
+        ctx: Optional[Dict[str, Any]],
+        stage: str,
+        start: str,
+        finish: str,
+        *,
+        usage_ctx: Optional[Dict[str, Any]] = None,
+    ):
         self.ctx = ctx
+        self.usage_ctx = usage_ctx
         self.stage = stage
         self.start_message = start
         self.finish_message = finish
@@ -278,7 +318,7 @@ class _BuildStage:
 
     async def __aenter__(self) -> "_BuildStage":
         self._started_at = time.monotonic()
-        self._usage_token = ai_usage.begin_stage()
+        self._usage_token = ai_usage.begin_stage(self.stage)
         await _emit_event(self.ctx, build_log.STAGE_STARTED, stage=self.stage, message=self.start_message)
         return self
 
@@ -286,6 +326,8 @@ class _BuildStage:
         usage = ai_usage.finish_stage(self._usage_token) if self._usage_token is not None else None
         fallbacks = ai_usage.fallbacks()
         duration_ms = int((time.monotonic() - self._started_at) * 1000)
+        if usage:
+            await _persist_usage(self.usage_ctx, self.stage, usage.get("entries") or [])
         if exc is None:
             await _emit_event(
                 self.ctx,
@@ -529,7 +571,10 @@ async def plan(
     )
     await _commit(db)
 
-    async with _BuildStage(ctx, "plan", *_STAGE_TEXT["plan"]):
+    async with _BuildStage(
+        ctx, "plan", *_STAGE_TEXT["plan"],
+        usage_ctx=_usage_ctx(db, user_id=current_user.id, build_id=build_id),
+    ):
         async with user_ai_config.activate_user_provider(db, current_user.id):
             try:
                 raw_plan = await studio_ai.get_provider().plan(
@@ -605,7 +650,10 @@ async def outline(
     )
     await _commit(db)
 
-    async with _BuildStage(ctx, "outline", *_STAGE_TEXT["outline"]):
+    async with _BuildStage(
+        ctx, "outline", *_STAGE_TEXT["outline"],
+        usage_ctx=_usage_ctx(db, user_id=current_user.id, build_id=build_id),
+    ):
         async with user_ai_config.activate_user_provider(db, current_user.id):
             try:
                 raw = await studio_ai.get_provider().outline(
@@ -682,7 +730,10 @@ async def artifact(
     response: Optional[BuildResponse] = None
     replay_response: Optional[BuildResponse] = None
 
-    async with _BuildStage(ctx, "artifact", *_STAGE_TEXT["artifact"]):
+    async with _BuildStage(
+        ctx, "artifact", *_STAGE_TEXT["artifact"],
+        usage_ctx=_usage_ctx(db, user_id=current_user.id, build_id=build_id),
+    ):
         async with user_ai_config.activate_user_provider(db, current_user.id):
             try:
                 artifact_html = await studio_ai.get_provider().artifact(
@@ -844,7 +895,10 @@ async def edit_artifact(
     version_no: Optional[int] = None
     response: Optional[BuildResponse] = None
 
-    async with _BuildStage(ctx, "artifact", "开始保存编辑", "编辑已保存"):
+    async with _BuildStage(
+        ctx, "artifact", "开始保存编辑", "编辑已保存",
+        usage_ctx=_usage_ctx(db, user_id=current_user.id, build_id=build_id),
+    ):
         try:
             html = validate_artifact_html(data.html)
         except ValueError as exc:

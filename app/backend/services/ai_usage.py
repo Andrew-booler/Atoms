@@ -1,26 +1,45 @@
 """阶段级 AI token 用量收集。
 
-用 ContextVar 在单次阶段调用内累加供应商返回的 usage，避免改动
-OutputProvider 的接口形状；模拟输出没有 usage 时返回 None。
+用 ContextVar 在单次阶段调用内逐次记录供应商返回的 usage，避免改动
+OutputProvider 的接口形状；模拟输出没有 usage 时仍记录一次调用，但所有
+token 字段为 None（不伪造 0），由调用方原样落库。
 """
 import contextvars
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 
-Tracker = Dict[str, int]
-_usage: contextvars.ContextVar[Optional[Tracker]] = contextvars.ContextVar(
-    "studio_ai_usage", default=None
+UsageLike = Union[Dict[str, Any], object]
+
+_usage: contextvars.ContextVar[Optional[List[Dict[str, Any]]]] = contextvars.ContextVar(
+    "studio_ai_usage_entries", default=None
+)
+_stage: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar(
+    "studio_ai_usage_stage", default=None
 )
 _fallbacks: contextvars.ContextVar[List[Dict[str, Any]]] = contextvars.ContextVar(
     "studio_ai_fallbacks", default=[]
 )
 
 
-def begin_stage() -> contextvars.Token:
+def _int_or_none(value: Any) -> Optional[int]:
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _field(usage: UsageLike, name: str) -> Any:
+    if isinstance(usage, dict):
+        return usage.get(name)
+    return getattr(usage, name, None)
+
+
+def begin_stage(stage: Optional[str] = None) -> contextvars.Token:
     """开始统计一个阶段，返回用于结束统计的 token。"""
     _fallbacks.set([])
-    return _usage.set(
-        {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0, "calls": 0}
-    )
+    _stage.set(stage)
+    return _usage.set([])
 
 
 def record_fallback(payload: Dict[str, Any]) -> None:
@@ -34,29 +53,53 @@ def fallbacks() -> List[Dict[str, Any]]:
     return list(_fallbacks.get())
 
 
-def record_usage(usage: Any) -> None:
-    """累加一次模型调用的 usage；usage 可为 dict 或含同名字段的对象。"""
-    current = _usage.get()
-    if current is None or usage is None:
+def record_usage(usage: Optional[UsageLike], *, provider: Optional[str] = None) -> None:
+    """记录一次 AI 调用；usage 为 None 时字段全部记 None（模拟输出不伪造数字）。"""
+    entries = _usage.get()
+    if entries is None:
         return
 
-    def _field(name: str) -> int:
-        value = usage.get(name) if isinstance(usage, dict) else getattr(usage, name, 0)
-        try:
-            return int(value or 0)
-        except (TypeError, ValueError):
-            return 0
+    resolved_provider = provider
+    if resolved_provider is None and usage is not None:
+        resolved_provider = _field(usage, "provider")
 
-    current["prompt_tokens"] += _field("prompt_tokens")
-    current["completion_tokens"] += _field("completion_tokens")
-    current["total_tokens"] += _field("total_tokens")
-    current["calls"] += 1
+    entries.append(
+        {
+            "provider": resolved_provider,
+            "prompt_tokens": _int_or_none(_field(usage, "prompt_tokens")) if usage is not None else None,
+            "completion_tokens": _int_or_none(_field(usage, "completion_tokens")) if usage is not None else None,
+            "reasoning_tokens": _int_or_none(_field(usage, "reasoning_tokens")) if usage is not None else None,
+        }
+    )
 
 
-def finish_stage(token: contextvars.Token) -> Optional[Tracker]:
-    """结束统计并返回汇总；没有任何有效 usage 时返回 None。"""
-    current = _usage.get()
+def _sum_field(entries: List[Dict[str, Any]], name: str) -> Optional[int]:
+    values = [entry[name] for entry in entries if entry.get(name) is not None]
+    return sum(values) if values else None
+
+
+def finish_stage(token: contextvars.Token) -> Optional[Dict[str, Any]]:
+    """结束统计并返回汇总；没有任何调用记录时返回 None。"""
+    entries = _usage.get() or []
+    stage = _stage.get()
     _usage.reset(token)
-    if current is None or current["calls"] <= 0:
+    _stage.set(None)
+    if not entries:
         return None
-    return dict(current)
+
+    prompt_tokens = _sum_field(entries, "prompt_tokens")
+    completion_tokens = _sum_field(entries, "completion_tokens")
+    reasoning_tokens = _sum_field(entries, "reasoning_tokens")
+    total_tokens: Optional[int] = None
+    if prompt_tokens is not None or completion_tokens is not None:
+        total_tokens = (prompt_tokens or 0) + (completion_tokens or 0)
+
+    return {
+        "stage": stage,
+        "prompt_tokens": prompt_tokens,
+        "completion_tokens": completion_tokens,
+        "reasoning_tokens": reasoning_tokens,
+        "total_tokens": total_tokens,
+        "calls": len(entries),
+        "entries": entries,
+    }

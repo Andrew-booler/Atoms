@@ -12,7 +12,7 @@ mock 还是真实模型。
 from copy import deepcopy
 from typing import Optional, Protocol
 
-from services import aihub, studio_ai
+from services import ai_usage, aihub, studio_ai
 from services.studio_examples import fixture as example_fixture
 from services.studio_examples import match_example
 
@@ -36,13 +36,21 @@ class OutputProvider(Protocol):  # pragma: no cover - 类型协议，无运行�
 class MockOutputProvider:
     """示例驱动的确定性输出，命中示例返回对应示范网页，否则返回通用演示页。"""
 
+    @staticmethod
+    def _record_call() -> None:
+        """模拟调用没有 token usage：显式记录一次空用量，绝不伪造数字。"""
+        ai_usage.record_usage(None, provider="mock")
+
     async def plan(self, requirement: str, **kwargs) -> dict:
+        self._record_call()
         return deepcopy(example_fixture(requirement)["plan"])
 
     async def outline(self, requirement: str, plan: dict, **kwargs) -> dict:
+        self._record_call()
         return deepcopy(example_fixture(requirement)["outline"])
 
     async def artifact(self, requirement: str, plan: dict, outline: dict, **kwargs) -> str:
+        self._record_call()
         return example_fixture(requirement)["html"]
 
 

@@ -12,11 +12,12 @@ from sqlalchemy.pool import NullPool
 from core.database import get_db
 from core.exception_handlers import register_exception_handlers
 from core.middleware import configure_app_middlewares
+from models.ai_usage import AiUsageRecord
 from models.auth import User
 from models.build_events import BuildEvent
 from models.execution import Execution
 from models.user_ai_config import UserAIConfig
-from routers import studio, user_ai
+from routers import studio, user_ai, user_usage
 from services import studio_output
 from services.execution import ExecutionService
 
@@ -99,6 +100,7 @@ TABLES = [
     User.__table__,
     BuildEvent.__table__,
     UserAIConfig.__table__,
+    AiUsageRecord.__table__,
 ]
 
 
@@ -142,6 +144,7 @@ configure_app_middlewares(app)
 app.dependency_overrides[get_db] = database
 app.include_router(studio.router)
 app.include_router(user_ai.router)
+app.include_router(user_usage.router)
 register_exception_handlers(app)
 
 
@@ -149,7 +152,7 @@ register_exception_handlers(app)
 async def reset():
     state.update(stage="", mode="", remaining=0)
     async with engine.begin() as connection:
-        await connection.execute(text(f'TRUNCATE "{SCHEMA}".studio_messages, "{SCHEMA}".studio_versions, "{SCHEMA}".projects, "{SCHEMA}".executions, "{SCHEMA}".build_events, "{SCHEMA}".user_ai_configs RESTART IDENTITY'))
+        await connection.execute(text(f'TRUNCATE "{SCHEMA}".studio_messages, "{SCHEMA}".studio_versions, "{SCHEMA}".projects, "{SCHEMA}".executions, "{SCHEMA}".build_events, "{SCHEMA}".user_ai_configs, "{SCHEMA}".ai_usage_records RESTART IDENTITY'))
     return {"schema": SCHEMA, "reset": True}
 
 
