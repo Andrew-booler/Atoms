@@ -1,9 +1,10 @@
 from datetime import datetime
 from typing import Optional
 
-from core.database import Base
 from sqlalchemy import DateTime, func
 from sqlalchemy.orm import Mapped, mapped_column
+
+from core.database import Base
 
 __all__ = ["Base", "BaseModel"]
 

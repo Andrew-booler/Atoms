@@ -1,7 +1,8 @@
 import logging
 
-from dependencies.auth import get_admin_user, get_current_user
 from fastapi import APIRouter, Depends, HTTPException, status
+
+from dependencies.auth import get_admin_user, get_current_user
 from schemas.auth import UserResponse
 from schemas.storage import (
     BucketListResponse,

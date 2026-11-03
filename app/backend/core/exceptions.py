@@ -11,7 +11,6 @@ from typing import Any
 from core import error_codes
 from core.log_redaction import redact_sensitive_text
 
-
 _SECRET_KEYS = (
     "key",
     "token",
@@ -103,7 +102,7 @@ class RateLimitError(AppError):
 
 
 class PayloadTooLargeError(AppError):
-    code = error_codes.ARTIFACT_TOO_LARGE
+    code = error_codes.PAYLOAD_TOO_LARGE
     http_status = 413
 
 

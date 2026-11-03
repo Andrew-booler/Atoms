@@ -123,8 +123,6 @@ def create_access_token(claims: Dict[str, Any], expires_minutes: Optional[int] =
     from jose import jwt
 
     token = jwt.encode(token_claims, secret, algorithm="HS256")
-    # Log user hash instead of actual user ID to avoid exposing sensitive information
-    user_id = token_claims.get("sub", "unknown")
     return token
 
 
@@ -137,8 +135,6 @@ def decode_access_token(token: str) -> Dict[str, Any]:
 
     try:
         payload = jwt.decode(token, secret, algorithms=["HS256"])
-        # Log user hash instead of actual user ID to avoid exposing sensitive information
-        user_id = payload.get("sub", "unknown")
         return payload
     except ExpiredSignatureError as exc:
         logger.info("Authentication token has expired")
@@ -224,8 +220,6 @@ async def validate_id_token(id_token: str) -> Optional[Dict[str, Any]]:
                 issuer=settings.oidc_issuer_url,
                 audience=settings.oidc_client_id,
             )
-            # Log user hash instead of actual user ID to avoid exposing sensitive information
-            user_id = payload.get("sub", "unknown")
             return payload
         except ExpiredSignatureError:
             logger.error("JWT validation failed: ID token has expired")

@@ -1,9 +1,10 @@
 from pathlib import Path
 from typing import Dict
 
-from dependencies.auth import get_admin_user
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
+
+from dependencies.auth import get_admin_user
 from schemas.auth import UserResponse
 
 router = APIRouter(prefix="/api/v1/admin/settings", tags=["admin-settings"])

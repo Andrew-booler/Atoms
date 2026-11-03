@@ -4,6 +4,10 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Tuple
 from uuid import uuid4
 
+from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from core import error_codes
 from core.auth import create_access_token
 from core.config import settings
@@ -11,9 +15,6 @@ from core.exceptions import AuthError, ConflictError
 from core.password import hash_password, verify_password
 from models.auth import User
 from schemas.auth import UserResponse
-from sqlalchemy import select
-from sqlalchemy.exc import IntegrityError
-from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
 

@@ -8,7 +8,6 @@ import json
 from schemas.aihub import GenTxtResponse
 from services import studio_ai
 
-
 PLAN_JSON = json.dumps(
     {"summary": "计划", "steps": [{"title": "步骤"}], "files": [], "stack": []},
     ensure_ascii=False,

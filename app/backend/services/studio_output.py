@@ -12,8 +12,7 @@ mock 还是真实模型。
 from copy import deepcopy
 from typing import Optional, Protocol
 
-from services import aihub
-from services import studio_ai
+from services import aihub, studio_ai
 from services.studio_examples import fixture as example_fixture
 from services.studio_examples import match_example
 

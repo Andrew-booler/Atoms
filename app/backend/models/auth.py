@@ -1,9 +1,10 @@
 from datetime import datetime
 from typing import Optional
 
-from models.base import Base
 from sqlalchemy import Boolean, DateTime, Integer, String, func
 from sqlalchemy.orm import Mapped, mapped_column
+
+from models.base import Base
 
 
 class User(Base):

@@ -5,11 +5,12 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Iterable
 
-from core.database import db_manager
-from core.environment import get_env_bool
 from sqlalchemy import Date, DateTime, MetaData, Table, func, select
 from sqlalchemy.exc import NoSuchTableError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncEngine
+
+from core.database import db_manager
+from core.environment import get_env_bool
 
 logger = logging.getLogger(__name__)
 

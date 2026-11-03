@@ -14,10 +14,11 @@ import os
 import random
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, AsyncGenerator, Callable, Dict, List, Optional, Tuple, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, AsyncGenerator, Callable, Dict, List, Optional, Tuple
 
-from schemas.aihub import AnalyzePdfRequest, AnalyzePdfResponse
 from schemas.aihub import (
+    AnalyzePdfRequest,
+    AnalyzePdfResponse,
     GenAudioRequest,
     GenAudioResponse,
     GenImgRequest,

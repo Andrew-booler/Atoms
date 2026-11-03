@@ -1,9 +1,11 @@
 """认证路由：仅邮箱/密码注册与登录，不提供 OAuth 或平台令牌交换。"""
 import logging
 
+from fastapi import APIRouter, Depends, status
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from core.database import get_db
 from dependencies.auth import get_current_user
-from fastapi import APIRouter, Depends, status
 from schemas.auth import (
     AuthResponse,
     LoginRequest,
@@ -11,7 +13,6 @@ from schemas.auth import (
     UserResponse,
 )
 from services.auth import AuthService
-from sqlalchemy.ext.asyncio import AsyncSession
 
 router = APIRouter(prefix="/api/v1/auth", tags=["authentication"])
 logger = logging.getLogger(__name__)

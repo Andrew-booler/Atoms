@@ -1,8 +1,10 @@
-from core.database import Base
 from datetime import datetime as PyDateTime
 from typing import Optional
+
 from sqlalchemy import DateTime, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
+
+from core.database import Base
 
 
 class Studio_messages(Base):

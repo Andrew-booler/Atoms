@@ -6,9 +6,10 @@
 import json
 from typing import Any, Dict, List, Optional
 
-from models.build_events import BuildEvent
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+
+from models.build_events import BuildEvent
 
 STAGE_STARTED = "stage_started"
 STAGE_FINISHED = "stage_finished"

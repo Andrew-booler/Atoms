@@ -1,8 +1,9 @@
 import logging
 
+from sqlalchemy import text
+
 from core.database import db_manager
 from core.environment import get_env_bool
-from sqlalchemy import text
 
 logger = logging.getLogger(__name__)
 

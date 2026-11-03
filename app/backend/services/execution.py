@@ -16,13 +16,13 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
 
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from core import error_codes
-from core.config import settings
 from core.environment import get_env_int
 from core.exceptions import SandboxUnavailableError
 from models.execution import Execution
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
 

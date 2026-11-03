@@ -1,25 +1,29 @@
+import asyncio
 import importlib
 import logging
 import os
 import pkgutil
-import asyncio
 from contextlib import asynccontextmanager
 from datetime import datetime
+
+from fastapi import FastAPI, HTTPException
+from fastapi.responses import FileResponse
+from fastapi.routing import APIRouter
 
 from core.config import settings
 from core.environment import get_env_bool
 from core.exception_handlers import register_exception_handlers
 from core.log_redaction import install_sensitive_data_filter
-from fastapi import FastAPI, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
-from fastapi.routing import APIRouter
+from core.middleware import configure_app_middlewares
 from utils.logging_utils import cleanup_old_log_files
 
 try:
     from core.telemetry import RequestSummaryMiddleware
 except Exception:  # Telemetry must never prevent the generated app from starting.
     RequestSummaryMiddleware = None
+
+logger = logging.getLogger(__name__)
+
 
 def setup_logging():
     """Configure the logging system."""
@@ -76,7 +80,7 @@ async def lifespan(app: FastAPI):
 
     if not get_env_bool("MGX_IGNORE_MODULE_INIT", default=True):
         # MODULE_IMPORTS_START
-        from services.database import initialize_database, close_database
+        from services.database import close_database, initialize_database
         # MODULE_IMPORTS_END
 
         # MODULE_STARTUP_START
@@ -85,8 +89,8 @@ async def lifespan(app: FastAPI):
         pass
 
     # 沙箱回收器：启动时清理残留容器，后台定期回收过期执行
-    from services.execution import ExecutionService
     from core.environment import get_env_int
+    from services.execution import ExecutionService
 
     ExecutionService.cleanup_orphan_containers()
     cleanup_interval = get_env_int("SANDBOX_CLEANUP_INTERVAL", default=60)
@@ -109,6 +113,7 @@ async def lifespan(app: FastAPI):
 async def _sandbox_cleanup_loop(interval: int) -> None:
     """后台定期回收过期沙箱执行。"""
     import asyncio as _asyncio
+
     from core.database import db_manager
     from services.execution import ExecutionService
 
@@ -135,14 +140,8 @@ app = FastAPI(
 
 
 # MODULE_MIDDLEWARE_START
-app.add_middleware(
-    CORSMiddleware,
-    allow_origin_regex=r".*",
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-    expose_headers=["*"],
-)
+# 限流 / 请求体上限 / CORS 白名单 / 安全响应头（生产与测试共用装配）
+configure_app_middlewares(app)
 # MODULE_MIDDLEWARE_END
 
 # Keep request diagnostics outermost so installed module middleware is included.

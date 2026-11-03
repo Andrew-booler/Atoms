@@ -4,7 +4,6 @@
 """
 from services import studio_output
 
-
 HYDRATION_REQ = "一个记录每日饮水量的追踪器，带进度环"
 
 

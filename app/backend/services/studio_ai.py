@@ -16,7 +16,7 @@ from core import error_codes
 from core.exceptions import ProviderError
 from schemas.aihub import ChatMessage, GenTxtRequest
 from services import ai_usage
-from services.aihub import AIHubService, AI_MAX_RETRIES, _backoff_seconds, _env_bool, _env_int
+from services.aihub import AI_MAX_RETRIES, AIHubService, _backoff_seconds, _env_bool, _env_int
 
 #: 各阶段结构化输出失败时使用的错误码：(通用失败, 内容无效)。
 _STAGE_ERROR_CODES: Dict[str, tuple[str, str]] = {

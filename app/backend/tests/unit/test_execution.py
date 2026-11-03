@@ -1,7 +1,5 @@
 """执行层单元测试：mock subprocess 与 socket，验证 docker run 参数与流程。"""
-import asyncio
 import os
-import socket
 import subprocess
 import tempfile
 import time
@@ -15,10 +13,10 @@ import pytest_asyncio
 # 隔离沙箱根目录，避免污染系统临时目录
 os.environ.setdefault("SANDBOX_ROOT", str(Path(tempfile.gettempdir()) / "atoms_sandbox_test"))
 
-from models.execution import Execution
-from services.execution import CONTAINER_PREFIX, ExecutionService
 from core import error_codes
 from core.exceptions import SandboxUnavailableError
+from models.execution import Execution
+from services.execution import CONTAINER_PREFIX, ExecutionService
 
 
 def _make_result(returncode: int = 0, stdout: str = "", stderr: str = "") -> subprocess.CompletedProcess:

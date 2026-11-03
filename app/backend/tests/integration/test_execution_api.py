@@ -13,10 +13,10 @@ import pytest_asyncio
 
 os.environ.setdefault("SANDBOX_ROOT", str(Path(tempfile.gettempdir()) / "atoms_sandbox_integration"))
 
-from models.execution import Execution
-from core.exceptions import SandboxUnavailableError
-from services.execution import ExecutionService
 from sqlalchemy import select
+
+from models.execution import Execution
+from services.execution import ExecutionService
 from testing import studio_app as host
 
 pytestmark = pytest.mark.asyncio

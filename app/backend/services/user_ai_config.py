@@ -5,7 +5,6 @@
   失败后 aihub 仍按系统默认链降级；
 - 连通性探测只请求 /models，不发送消息体，不回显密钥。
 """
-import contextvars
 import logging
 import time
 from contextlib import asynccontextmanager
@@ -16,7 +15,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core import error_codes
-from core.exceptions import NotFoundError, ValidationError
+from core.exceptions import ValidationError
 from core.user_ai_crypto import decrypt_api_key, encrypt_api_key, mask_api_key
 from models.user_ai_config import UserAIConfig
 from services import aihub

@@ -3,20 +3,26 @@ import asyncio
 import os
 import re
 from contextlib import asynccontextmanager
+
 from fastapi import FastAPI, HTTPException
 from sqlalchemy import text
-from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
-from routers import studio
-from routers import user_ai
-from services import studio_output
+
 from core.database import get_db
 from core.exception_handlers import register_exception_handlers
+from core.middleware import configure_app_middlewares
 from models.auth import User
 from models.build_events import BuildEvent
 from models.execution import Execution
 from models.user_ai_config import UserAIConfig
+from routers import studio, user_ai
+from services import studio_output
 from services.execution import ExecutionService
+
+# 集成宿主默认放开限流阈值，避免用例内多次生成被误伤；限流专项用例会临时调低。
+os.environ.setdefault("APP_RATE_LIMIT_GENERATION_PER_MINUTE", "100000")
+os.environ.setdefault("APP_RATE_LIMIT_IP_PER_MINUTE", "100000")
 
 SCHEMA = os.environ.get("STUDIO_TEST_SCHEMA", "studio_test_t1")
 TEST_USER_ID = "studio-test-user"
@@ -70,15 +76,18 @@ class ControlledProvider(studio_output.MockOutputProvider):
         return False
 
     async def plan(self, requirement, **kwargs):
-        if await self.control("plan"): return {"summary": "缺字段"}
+        if await self.control("plan"):
+            return {"summary": "缺字段"}
         return await super().plan(requirement, **kwargs)
 
     async def outline(self, requirement, plan, **kwargs):
-        if await self.control("outline"): return {"title": "缺字段"}
+        if await self.control("outline"):
+            return {"title": "缺字段"}
         return await super().outline(requirement, plan, **kwargs)
 
     async def artifact(self, requirement, plan, outline, **kwargs):
-        if await self.control("artifact"): return ""
+        if await self.control("artifact"):
+            return ""
         return await super().artifact(requirement, plan, outline, **kwargs)
 
 
@@ -129,6 +138,7 @@ async def lifespan(app):
 
 
 app = FastAPI(lifespan=lifespan)
+configure_app_middlewares(app)
 app.dependency_overrides[get_db] = database
 app.include_router(studio.router)
 app.include_router(user_ai.router)

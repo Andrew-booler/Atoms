@@ -1,17 +1,16 @@
 import json
 import logging
+from datetime import datetime
 from typing import List, Optional
 
-from datetime import datetime, date
-
-from fastapi import APIRouter, Body, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.database import get_db
-from services.projects import ProjectsService
 from dependencies.auth import get_current_user
 from schemas.auth import UserResponse
+from services.projects import ProjectsService
 
 # Set up logging
 logger = logging.getLogger(__name__)

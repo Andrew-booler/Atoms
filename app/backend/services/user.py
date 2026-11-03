@@ -2,9 +2,10 @@ import logging
 import time
 from typing import Optional
 
-from models.auth import User
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+
+from models.auth import User
 
 logger = logging.getLogger(__name__)
 

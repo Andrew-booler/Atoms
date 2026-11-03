@@ -9,7 +9,6 @@ from services.studio_validation import (
     validate_plan_payload,
 )
 
-
 EXACT = [
     ("一个记录每日饮水量的追踪器，带进度环", "hydration"),
     ("团队任务看板，支持新增、拖动状态、筛选", "kanban"),

@@ -18,6 +18,8 @@ omit =
     */studio_versions.py
 
 [report]
+# 覆盖率门禁（P0 横切补强）：沿用既有 75% 口径，排除名单保持不变。
+fail_under = 75
 exclude_lines =
     pragma: no cover
     if TYPE_CHECKING:

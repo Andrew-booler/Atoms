@@ -38,15 +38,15 @@
 | # | 痛点（归并去重） | 出处（文件·章节） | 现状判定 | 落位（Phase / 横切） |
 |---|---|---|---|---|
 | P1 | 多用户数据隔离缺失：studio 路由共享 `studio-shared` 数据，未按 `user_id` 过滤 | 项目说明 §二「关键横切缺口」；需求说明 §1 | **已解决**（2026-11-04） | Phase 17（与登录/会话合并实施） |
-| P2 | 服务端速率限制缺失（auth 防暴力破解、artifact/build 防 DoS） | 项目说明 §二；本文件 NFR P0 | 待解决（原定 Phase 1 同期未落地） | 横切 P0，与 Phase 16 同期补 |
-| P3 | 请求体大小限制缺失（`artifact_html` 无上限） | 项目说明 §二；本文件 NFR P0 | 待解决（原定 Phase 1 同期未落地） | 横切 P0，与 Phase 16 同期补 |
-| P4 | CORS 未收紧（`allow_origin_regex=".*"` + 凭据） | 项目说明 §二；本文件 NFR P0 | 待解决（原定 Phase 1 同期未落地） | 横切 P0，与 Phase 16 同期补 |
+| P2 | 服务端速率限制缺失（auth 防暴力破解、artifact/build 防 DoS） | 项目说明 §二；本文件 NFR P0 | **已解决**（2026-11-04，生成类接口令牌桶） | 横切 P0，已实施 |
+| P3 | 请求体大小限制缺失（`artifact_html` 无上限） | 项目说明 §二；本文件 NFR P0 | **已解决**（2026-11-04，413 `PAYLOAD_TOO_LARGE`） | 横切 P0，已实施 |
+| P4 | CORS 未收紧（`allow_origin_regex=".*"` + 凭据） | 项目说明 §二；本文件 NFR P0 | **已解决**（2026-11-04，环境变量白名单） | 横切 P0，已实施 |
 | P5 | AI 密钥轮换缺失 | 项目说明 §二；本文件 NFR P1「密钥管理」 | 待解决 | 横切 P1，Phase 16 或 Phase 5 前 |
 | P6 | AI token 用量与成本追踪缺失 | 项目说明 §二 | 待解决 | Phase 9「成本控制」 |
 | P7 | CI 流水线缺失（无 `.github/workflows`） | 项目说明 §二；本文件「代码质量门禁」P1 | 待解决 | 横切 P0/P1，先建骨架 |
-| P8 | 后端 lint/format 缺失（无 ruff/black 配置） | 项目说明 §二；门禁 P0 | 待解决 | 横切 P0，与 Phase 16 同期 |
+| P8 | 后端 lint/format 缺失（无 ruff/black 配置） | 项目说明 §二；门禁 P0 | **已解决**（2026-11-04，`pyproject.toml` ruff 配置） | 横切 P0，已实施 |
 | P9 | 后端类型检查缺失（无 mypy 配置） | 项目说明 §二；门禁 P1 | 待解决 | 横切 P1，Phase 5 前 |
-| P10 | 覆盖率阈值门禁缺失（`.coveragerc` 无 `fail_under`） | 项目说明 §二；门禁 P0 | 待解决 | 横切 P0，与 Phase 16 同期 |
+| P10 | 覆盖率阈值门禁缺失（`.coveragerc` 无 `fail_under`） | 项目说明 §二；门禁 P0 | **已解决**（2026-11-04，`fail_under = 75`） | 横切 P0，已实施 |
 | P11 | Phase 5–12 未实施（多 Agent/工具框架/安全扫描/生产预览/发布/终端/知识库/队列） | 项目说明 §二「未完成」 | 待排期（方向已确认） | 既有 Phase 5–12 |
 | P12 | 无登录/认证/租户体系（共享账号、无登录入口） | 需求说明 §1「产品目标和边界」、阅读背景 | **已解决**（2026-11-04） | Phase 17（与 P1 多用户隔离合并实施；不含角色/租户后台） |
 | P13 | 错误协议只回 HTTP 状态码 + 固定文案（422/404/502/500），用户看不懂 | 需求说明 §5「当前规则与限制·错误协议」 | 待解决（2026-11-03 新需求） | **Phase 16** 统一业务异常体系 |
@@ -111,7 +111,7 @@
 | 4 | 真实 AI Provider（多供应商主备 + 示例短路） | Phase 4 | 已完成（2026-11-04 实测可用） | Phase 2 或 Phase 3 | 已落地；百炼与方舟均已实测返回非空正文 |
 | 5 | 统一业务异常体系（`ErrorResponse{code,message,details?}`） | Phase 16 | 立即（P0） | 无 | 已完成（2026-11-04）；错误可读性直接决定可用性 |
 | 6 | 认证与多用户数据隔离（登录/会话 + `user_id` 过滤） | Phase 17 | 紧接 Phase 16，Phase 5 之前 | 无（依赖 Phase 16 的错误契约） | 已完成（2026-11-04，仅本地验证）；共享账号与数据串用属事故级风险 |
-| 7 | P0 横切补强（限流、请求体上限、CORS 收紧、lint/覆盖率门禁） | 横切 NFR（非 Phase） | 与 Phase 16/17 同期 | Phase 16（共用异常与路由改造面） | 安全稳定底线，原定 Phase 1 同期、已逾期 |
+| 7 | P0 横切补强（限流、请求体上限、CORS 收紧、lint/覆盖率门禁） | 横切 NFR（非 Phase） | 已完成（2026-11-04，仅本地验证；临时提前于 Phase 5/11） | Phase 16（共用异常与路由改造面） | 安全稳定底线，原定 Phase 1 同期、已逾期；已完成 429/413、CORS 白名单、安全响应头、ruff 与 75% 覆盖率门禁 |
 | 8 | 多 Agent 协作（角色体系 + 编排器 + 交接/审批） | Phase 5 | Phase 17 之后 | Phase 4 | 核心差异化能力，但先保证可安全对外 |
 | 9 | 工具与集成框架（内置工具、MCP、外部连接器） | Phase 6 | Phase 5 之后（可提前做内置工具） | Phase 4（或 Phase 5） | 多 Agent 需要工具才能落地；先内置后扩展 |
 | 10 | 安全扫描与质量门禁（密钥泄漏、XSS、权限风险） | Phase 7 | Phase 6 之后、发布前 | Phase 1、Phase 6 | 作为内置工具实现；为 Phase 9 发布提供门禁 |
@@ -129,6 +129,15 @@
 **临时顺序调整（2026-11-04，仅影响实施时点）**：本轮跳过 Phase 5、先完整交付 Phase 10。理由：Phase 5（多 Agent 协作，21 points）体量远大于当前交付窗口，半途停下会再次留下半成品；Phase 10 只依赖 Phase 1 的沙箱能力，可在窗口内完整实现、测试与验证。该调整不改变 Phase 编号、依赖关系与文档引用，**Phase 5 仍是下一轮首位**。
 
 **临时顺序调整（2026-11-04，Phase 13 提前）**：本轮在 Phase 10 之后先做 Phase 13（用户自选 AI API），Phase 11（知识库 + RAG）顺延。理由：Phase 11 体量与 Phase 5 同级，当前交付窗口无法完整完成；Phase 13 与刚完成的供应商层直接相邻、体量可控，可完整交付测试与前端。该调整不改变编号与依赖，**下一轮首位仍是 Phase 5，其次 Phase 11**。
+
+**临时顺序调整（2026-11-04，P0 横切补强提前）**：本轮在 Phase 13 之后先完成 P0 横切补强（实现顺序表第 7 项，原定与 Phase 16/17 同期、已逾期），Phase 5（多 Agent）与 Phase 11（知识库 + RAG）继续顺延。理由：Phase 5/11 均为大工程，当前交付窗口无法完整完成；横切补强是安全底线、体量可控，可完整实现、测试与文档收口。该调整不改变 Phase 编号与依赖，**下一轮首位仍是 Phase 5，其次 Phase 11**。
+
+**P0 跨切面约定（2026-11-04）**：
+- 限流：仅覆盖生成类接口（plan/outline/artifact、artifact/edit、builds、versions/{id}/run、user/ai-config/test），已登录按 `user_id`、未登录按 IP 使用令牌桶；默认登录 10 次/分钟、未登录 20 次/分钟/IP，超限 429 `RATE_LIMITED` + `Retry-After`。健康检查、SSE 已建立连接不计入。
+- 请求体上限：默认 4 MiB，`Content-Length` 预检 + 流式累计双重防护，超限 413 `PAYLOAD_TOO_LARGE`。
+- CORS：环境变量来源白名单，默认只允许本地开发前端；禁止 `*` 与凭据同时启用；预检与错误响应共用同一套 CORS 中间件。
+- 安全响应头：`X-Content-Type-Options: nosniff`、`Referrer-Policy`、`X-Frame-Options: DENY`、`Permissions-Policy`。已确认预览页面由沙箱在独立端口提供（不同源、非本应用响应），因此 `DENY` 不会拦截 iframe 预览，也不额外下发 `frame-ancestors`。
+- 质量门禁：`ruff check .` 必须通过；全量 `pytest tests` 由 `.coveragerc` 的 `fail_under = 75` 强制执行覆盖率阈值，排除名单保持不变。
 
 **Phase 10 SSE 约定（2026-11-04）**：事件类型固定为 `stage_started` / `stage_finished` / `file_created` / `log` / `error` / `done`；一次构建以 `(user_id, project_id, build_id)` 定位，`seq` 在构建内递增；`done` 与 `error` 为终止事件，服务端发送后主动关闭连接；鉴权沿用 Phase 17 的 JWT，SSE 端点优先读 `Authorization: Bearer`，浏览器原生 `EventSource` 可用 `?access_token=` 兜底。事件只含文件名与字节数，不落页面正文。
 

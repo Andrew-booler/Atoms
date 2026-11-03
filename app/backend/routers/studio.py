@@ -38,7 +38,6 @@ from schemas.studio import (
     MessageOut,
     ModelOption,
     ModelsResponse,
-    OutlinePayload,
     OutlineRequest,
     OutlineResponse,
     PlanPayload,
@@ -51,10 +50,9 @@ from schemas.studio import (
     VersionDetail,
     VersionSummary,
 )
-from services import ai_usage
+from services import ai_usage, user_ai_config
 from services import build_events as build_log
 from services import studio_output as studio_ai
-from services import user_ai_config
 from services.aihub import AllProvidersFailedError
 from services.execution import ExecutionService
 from services.studio_validation import (
@@ -501,7 +499,7 @@ async def append_message(
     current_user: UserResponse = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> MessageOut:
-    project = await _load_project(db, project_id, current_user.id)
+    await _load_project(db, project_id, current_user.id)
     row = await _append_message(
         db,
         project_id=project_id,

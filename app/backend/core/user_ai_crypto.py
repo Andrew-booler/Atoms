@@ -11,7 +11,7 @@ from typing import Optional
 
 from cryptography.fernet import Fernet, InvalidToken
 
-from core.auth import AuthConfigurationError, get_auth_secret
+from core.auth import get_auth_secret
 
 logger = logging.getLogger(__name__)
 

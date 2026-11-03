@@ -1,10 +1,10 @@
 import logging
 from datetime import date, datetime
 from decimal import Decimal
-from typing import Optional, Dict, Any, List
+from typing import Any, Dict, List, Optional
 from uuid import UUID as PythonUUID
 
-from sqlalchemy import select, func
+from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.types import Boolean, Date, DateTime, Float, Integer, Numeric

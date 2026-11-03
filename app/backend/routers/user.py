@@ -1,13 +1,14 @@
 from typing import Optional
 
+from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import BaseModel
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from core.database import get_db
 from dependencies.auth import get_current_user
-from fastapi import APIRouter, Depends, HTTPException, status
 from models.auth import User
-from pydantic import BaseModel
 from schemas.auth import UserResponse
 from services.user import UserService
-from sqlalchemy.ext.asyncio import AsyncSession
 
 router = APIRouter(prefix="/api/v1/users", tags=["users"])
 

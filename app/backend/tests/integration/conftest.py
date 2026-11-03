@@ -22,6 +22,7 @@ os.environ.setdefault("APP_AUTH_SECRET", "test-auth-secret")
 from core.auth import create_access_token  # noqa: E402
 from core.database import get_db  # noqa: E402
 from core.exception_handlers import register_exception_handlers  # noqa: E402
+from core.middleware import configure_app_middlewares  # noqa: E402
 from routers import auth, health, user_ai  # noqa: E402
 from routers import settings as settings_router  # noqa: E402
 from testing import studio_app as host  # noqa: E402
@@ -43,6 +44,7 @@ def _api_app() -> FastAPI:
         await host.engine.dispose()
 
     app = FastAPI(lifespan=lifespan)
+    configure_app_middlewares(app)
     app.dependency_overrides[get_db] = host.database
     app.include_router(auth.router)
     app.include_router(health.router)

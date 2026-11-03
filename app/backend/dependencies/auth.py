@@ -2,16 +2,17 @@
 import logging
 from typing import Optional
 
+from fastapi import Depends, Request
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from core import error_codes
 from core.auth import AccessTokenError, AuthConfigurationError, decode_access_token
 from core.database import get_db
 from core.exceptions import AuthError
-from fastapi import Depends, Request
-from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from models.auth import User
 from schemas.auth import UserResponse
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
 
