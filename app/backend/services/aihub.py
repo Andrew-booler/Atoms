@@ -94,12 +94,18 @@ AI_RETRY_MAX_SECONDS = float(os.environ.get("APP_AI_RETRY_MAX", "30.0"))
 # 供应商优先级：主选 → 备选 → 兜底，可用 APP_AI_PROVIDER_ORDER 调整。
 AI_PROVIDER_ORDER = os.environ.get("APP_AI_PROVIDER_ORDER", "aliyun,ark,zhipu")
 
-# 思考（reasoning）开关：默认关闭。关闭时对支持的供应商显式传禁用参数，
-# 避免 reasoning 占用 completion 预算导致长 HTML 被截断；开启时不传，沿用供应商默认。
-THINKING_DISABLE_BODY: Dict[str, Dict[str, Any]] = {
+# 思考（reasoning）开关：默认关闭，可用 APP_AI_ENABLE_THINKING 打开。
+# 百炼：enable_thinking + thinking_budget（MISSING: 仅百炼支持 thinking_budget）。
+# 方舟：reasoning_effort（none 关闭 / high 开启），不再传 thinking.type，避免 400。
+# 其他供应商不传任何思考参数。
+THINKING_EXTRA_BODY: Dict[str, Dict[str, Any]] = {
     "aliyun": {"enable_thinking": False},
-    "ark": {"thinking": {"type": "disabled"}},
+    "ark": {"reasoning_effort": "none"},
 }
+# 思考预算默认值（仅百炼生效），可用 APP_STUDIO_THINKING_BUDGET 覆盖。
+STUDIO_THINKING_BUDGET = 2048
+# 方舟开启思考时使用的 reasoning_effort。
+ARK_REASONING_EFFORT = os.environ.get("APP_AI_ARK_REASONING_EFFORT", "high").strip() or "high"
 
 
 def _backoff_seconds(attempt: int) -> float:
@@ -149,24 +155,32 @@ def _env_bool(name: str, default: bool = False) -> bool:
 class ProviderConfig:
     """单个 AI 供应商的独立配置（缺失 base_url/api_key/model 任一项则整家跳过）。
 
-    max_tokens 仅作为请求未显式指定时的兜底，不再覆盖按阶段传入的值。
-    thinking_enabled 为 False 时，对支持的供应商（aliyun/ark）显式禁用思考。
+    max_completion_tokens 仅作为请求未显式指定时的兜底，不再覆盖按阶段传入的值。
+    thinking_enabled 控制百炼/方舟的思考参数；其他供应商不传，避免 400。
     """
 
     name: str
     base_url: str
     api_key: str
     model: str
-    max_tokens: Optional[int] = None
+    max_completion_tokens: Optional[int] = None
     max_concurrency: int = AI_MAX_CONCURRENCY
     timeout: float = 60.0
     thinking_enabled: bool = False
+    thinking_budget: Optional[int] = None
 
     def thinking_extra_body(self) -> Optional[Dict[str, Any]]:
-        """按供应商返回 extra_body；不支持或未关闭思考时返回 None（不传，避免 400）。"""
-        if self.thinking_enabled:
+        """按供应商生成独占的思考参数；不支持的供应商返回 None（不传）。"""
+        extra = THINKING_EXTRA_BODY.get(self.name)
+        if extra is None:
             return None
-        return THINKING_DISABLE_BODY.get(self.name)
+        body = dict(extra)
+        if self.name == "aliyun" and self.thinking_enabled:
+            body["enable_thinking"] = True
+            body["thinking_budget"] = self.thinking_budget or STUDIO_THINKING_BUDGET
+        elif self.name == "ark" and self.thinking_enabled:
+            body["reasoning_effort"] = ARK_REASONING_EFFORT
+        return body
 
 
 @dataclass(frozen=True)
@@ -225,10 +239,11 @@ def _build_providers() -> List[ProviderConfig]:
                 base_url=base_url.rstrip("/"),
                 api_key=api_key,
                 model=model,
-                max_tokens=_env_int(f"{prefix}_MAX_TOKENS", None),
+                max_completion_tokens=_env_int(f"{prefix}_MAX_COMPLETION_TOKENS", None),
                 max_concurrency=_env_int(f"{prefix}_MAX_CONCURRENCY", AI_MAX_CONCURRENCY) or AI_MAX_CONCURRENCY,
                 timeout=_env_float(f"{prefix}_TIMEOUT", 60.0) or 60.0,
                 thinking_enabled=thinking_enabled,
+                thinking_budget=_env_int("APP_STUDIO_THINKING_BUDGET", STUDIO_THINKING_BUDGET),
             )
         )
     return providers
@@ -324,14 +339,18 @@ class AIHubService:
         client = self._client_for(provider)
         messages = [self._convert_message(msg) for msg in request.messages]
         model = provider.model
-        # 按阶段传入的 max_tokens 优先；供应商级配置仅作兜底，避免全局覆盖各阶段预算。
-        max_tokens = request.max_tokens if request.max_tokens is not None else provider.max_tokens
+        # 统一使用 max_completion_tokens（百炼/方舟语义均为“思考+回答”总量），不再传 max_tokens。
+        max_completion_tokens = (
+            request.max_completion_tokens
+            if request.max_completion_tokens is not None
+            else provider.max_completion_tokens
+        )
         extra_body = provider.thinking_extra_body()
         create_kwargs: Dict[str, Any] = {
             "model": model,
             "messages": messages,
             "temperature": request.temperature,
-            "max_tokens": max_tokens,
+            "max_completion_tokens": max_completion_tokens,
             "stream": stream,
         }
         if extra_body:

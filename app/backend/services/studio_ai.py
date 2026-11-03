@@ -15,7 +15,7 @@ from typing import Any, Dict, List, Optional
 from core import error_codes
 from core.exceptions import ProviderError
 from schemas.aihub import ChatMessage, GenTxtRequest
-from services.aihub import AIHubService, AI_MAX_RETRIES, _backoff_seconds
+from services.aihub import AIHubService, AI_MAX_RETRIES, _backoff_seconds, _env_bool, _env_int
 
 #: 各阶段结构化输出失败时使用的错误码：(通用失败, 内容无效)。
 _STAGE_ERROR_CODES: Dict[str, tuple[str, str]] = {
@@ -70,11 +70,12 @@ def _profile(profile: Optional[str]) -> Dict[str, str]:
 
 
 # 各阶段输出预算：可用环境变量覆盖，避免硬编码；plan/outline 保持原值，
-# artifact 需要容纳完整单文件 HTML（thinking 已默认关闭，不额外占用预算）。
+# artifact 需要容纳完整单文件 HTML；请求总量另按思考开关换算（见 _stage_request_tokens）。
 STAGE_MAX_TOKENS_DEFAULTS: Dict[str, int] = {"plan": 1600, "outline": 2200, "artifact": 6144}
 
 
 def _stage_max_tokens(stage: str) -> int:
+    """阶段可见正文预算（不含思考与余量）。"""
     raw = os.environ.get(f"APP_STUDIO_{stage.upper()}_MAX_TOKENS")
     if raw and raw.strip():
         try:
@@ -82,6 +83,24 @@ def _stage_max_tokens(stage: str) -> int:
         except ValueError:
             pass
     return STAGE_MAX_TOKENS_DEFAULTS[stage]
+
+
+#: 请求总量余量：覆盖模型附加开销，避免正文恰好触顶。
+OUTPUT_TOKEN_MARGIN = 1024
+THINKING_BUDGET_DEFAULT = 2048
+
+
+def _stage_request_tokens(stage: str) -> int:
+    """按是否开启思考换算 max_completion_tokens 请求总量。
+
+    开启思考 = 可见正文 + thinking_budget + 余量；关闭思考 = 可见正文 + 余量。
+    仅百炼的 thinking_budget 生效，但该总量对两家供应商都安全（都包含思考）。
+    """
+    visible = _stage_max_tokens(stage)
+    if _env_bool("APP_AI_ENABLE_THINKING", False):
+        budget = _env_int("APP_STUDIO_THINKING_BUDGET", THINKING_BUDGET_DEFAULT) or THINKING_BUDGET_DEFAULT
+        return visible + budget + OUTPUT_TOKEN_MARGIN
+    return visible + OUTPUT_TOKEN_MARGIN
 
 
 def resolve_model(profile: Optional[str] = None) -> str:
@@ -133,7 +152,7 @@ async def _gentxt(
     user: str,
     *,
     model: str,
-    max_tokens: int,
+    max_completion_tokens: int,
     temperature: float = 0.6,
 ) -> str:
     service = AIHubService()
@@ -143,7 +162,7 @@ async def _gentxt(
             ChatMessage(role="user", content=user),
         ],
         model=model,
-        max_tokens=max_tokens,
+        max_completion_tokens=max_completion_tokens,
         temperature=temperature,
     )
     # 免费模型偶发返回空响应，视为瞬时失败并按指数退避重试。
@@ -167,13 +186,13 @@ async def _gentxt_json(
     *,
     stage: str,
     model: str,
-    max_tokens: int,
+    max_completion_tokens: int,
     required: List[str],
     temperature: float = 0.6,
 ) -> Dict[str, Any]:
     failure_code, invalid_code = _STAGE_ERROR_CODES[stage]
     raw = await _gentxt(
-        system, user, model=model, max_tokens=max_tokens, temperature=temperature
+        system, user, model=model, max_completion_tokens=max_completion_tokens, temperature=temperature
     )
     payload_text = _extract_json_block(raw)
     if not payload_text.strip():
@@ -192,7 +211,7 @@ async def _gentxt_json(
             "你只输出合法 JSON，字段齐全，不要解释。修复下面这段内容，返回合法 JSON。",
             payload_text,
             model=model,
-            max_tokens=max_tokens,
+            max_completion_tokens=max_completion_tokens,
             temperature=0,
         )
         try:
@@ -288,7 +307,7 @@ async def generate_plan(
 要求：steps 为 3-5 个，必须是实现该需求真正需要的步骤，不要写“需求分析”这种空话。"""
     payload = await _gentxt_json(
         PROMPT_SYSTEM, user, stage="plan", model=model,
-        max_tokens=_stage_max_tokens("plan"), required=["summary", "steps"],
+        max_completion_tokens=_stage_request_tokens("plan"), required=["summary", "steps"],
     )
     return _normalize_plan(payload)
 
@@ -315,7 +334,7 @@ async def generate_outline(
 要求：sections 为 3-5 个；内容要具体，能直接写成界面，不要抽象占位。"""
     payload = await _gentxt_json(
         PROMPT_SYSTEM, user, stage="outline", model=model,
-        max_tokens=_stage_max_tokens("outline"), required=["title", "sections"],
+        max_completion_tokens=_stage_request_tokens("outline"), required=["title", "sections"],
     )
     return _normalize_outline(payload)
 
@@ -347,7 +366,8 @@ async def generate_artifact(
 界面语言与需求语言保持一致。现在直接输出 HTML。"""
 
     raw = await _gentxt(
-        ARTIFACT_SYSTEM, user, model=model, max_tokens=_stage_max_tokens("artifact"), temperature=0.7
+        ARTIFACT_SYSTEM, user, model=model,
+        max_completion_tokens=_stage_request_tokens("artifact"), temperature=0.7,
     )
     try:
         return sanitize_html(raw)
@@ -357,7 +377,7 @@ async def generate_artifact(
             "上一次输出不是完整 HTML。请重新输出完整文档，从 <!DOCTYPE html> 开始、到 </html> 结束，只输出 HTML。\n\n需求："
             + requirement,
             model=model,
-            max_tokens=_stage_max_tokens("artifact"),
+            max_completion_tokens=_stage_request_tokens("artifact"),
             temperature=0.4,
         )
         try:

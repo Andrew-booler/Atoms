@@ -387,7 +387,7 @@ Phase 17 ── 登录/会话 + 多用户数据隔离 + 越权访问控制
   2. 公共域名 `dashscope.aliyuncs.com` + 同一模型 → 403 `AccessDenied.Unpurchased`（账号未在公共域名开通）；**两种域名权限不通用**，配置必须用工作区 MaaS 域名。
   3. 火山方舟：`deepseek-v4-1-flash-economy-261017` → 200、2.08s、正文非空、`finish_reason=stop`；该模型默认开启 thinking，`max_tokens` 过小（如 32）会被 reasoning 全部占用，导致 `content` 为空。
   4. 降级语义：401/403 立即降级且不重试；全部供应商失败时抛 `AllProvidersFailedError`。
-- **thinking 与预算（2026-11-04 更新）**：调用层新增 `APP_AI_ENABLE_THINKING`（默认 `false`）。关闭时对支持的供应商显式传禁用参数（百炼 `extra_body={"enable_thinking": false}`、方舟 `extra_body={"thinking": {"type": "disabled"}}`），其它供应商不传，避免 400；开启时不传，沿用供应商默认。Studio 三个阶段预算改为可配置且互不影响：`APP_STUDIO_PLAN_MAX_TOKENS`（默认 1600）、`APP_STUDIO_OUTLINE_MAX_TOKENS`（默认 2200）、`APP_STUDIO_ARTIFACT_MAX_TOKENS`（默认 6144）；按阶段传入的 `max_tokens` 优先于供应商级 `APP_AI_*_MAX_TOKENS`，避免全局覆盖把 plan/outline 也压小。`app/.env.example` 已同步说明。
+- **thinking 与预算（2026-11-04 更新，按官方文档核实）**：调用层新增 `APP_AI_ENABLE_THINKING`（默认 `false`）。**关闭时**百炼传 `extra_body={"enable_thinking": false}`、方舟传 `extra_body={"reasoning_effort": "none"}`（不再传 `thinking.type`），其它供应商不传；**开启时**百炼传 `enable_thinking=true` + `thinking_budget`（默认 2048，可用 `APP_STUDIO_THINKING_BUDGET` 覆盖）、方舟传 `reasoning_effort=high`。请求体统一改用 `max_completion_tokens`（百炼/方舟语义均为“思考+回答”总量），移除 `max_tokens`；百炼不再同传 `max_tokens`/`reasoning_effort`，方舟不再同传 `max_tokens`/`thinking`，避免互斥 400。Studio 三阶段可见正文预算仍由 `APP_STUDIO_PLAN_MAX_TOKENS`（1600）、`APP_STUDIO_OUTLINE_MAX_TOKENS`（2200）、`APP_STUDIO_ARTIFACT_MAX_TOKENS`（6144）控制，请求总量自动换算：开启思考 = 正文 + thinking_budget + 1024；关闭思考 = 正文 + 1024（artifact 默认分别为 9216 / 7168）。`app/.env.example` 已同步说明。
 - 替换 `MockOutputProvider` 已完成，Plan/Outline/HTML 响应形状不变，上层流程无感知。
 - **决策点（Phase 4 启动时定，已收敛）**：
   - 模型选型：需确认是否支持 **function-calling / tool use**（直接影响 Phase 5 多 Agent 交接和 Phase 6 工具调用）。

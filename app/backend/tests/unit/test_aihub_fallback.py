@@ -86,7 +86,7 @@ def _request() -> GenTxtRequest:
     return GenTxtRequest(
         messages=[ChatMessage(role="user", content="你好")],
         model="qwen3.8-flash",
-        max_tokens=32,
+        max_completion_tokens=32,
     )
 
 
@@ -96,7 +96,7 @@ def _provider(name: str, model: str, *, thinking_enabled: bool = False) -> aihub
         base_url=f"https://{name}.example/v1",
         api_key="test-key",
         model=model,
-        max_tokens=16,
+        max_completion_tokens=16,
         max_concurrency=1,
         timeout=5.0,
         thinking_enabled=thinking_enabled,
@@ -290,40 +290,47 @@ def test_build_providers_reads_thinking_switch(clean_env):
 
 
 async def test_thinking_disabled_sends_extra_body_per_provider():
-    """默认关闭思考：百炼/方舟各传自己的禁用参数，智谱不传。"""
+    """默认关闭思考：百炼 enable_thinking=false，方舟 reasoning_effort=none，智谱不传。"""
     aliyun = _FakeClient(["ok"])
     await _service([_provider("aliyun", "qwen3.8-flash")], {"aliyun": aliyun}).gentxt(_request())
     assert aliyun.calls[0]["extra_body"] == {"enable_thinking": False}
 
     ark = _FakeClient(["ok"])
     await _service([_provider("ark", "doubao-endpoint")], {"ark": ark}).gentxt(_request())
-    assert ark.calls[0]["extra_body"] == {"thinking": {"type": "disabled"}}
+    assert ark.calls[0]["extra_body"] == {"reasoning_effort": "none"}
+    assert "thinking" not in ark.calls[0]["extra_body"]
 
     zhipu = _FakeClient(["ok"])
     await _service([_provider("zhipu", "glm-4.7-flash")], {"zhipu": zhipu}).gentxt(_request())
     assert "extra_body" not in zhipu.calls[0]
 
 
-async def test_thinking_enabled_sends_no_extra_body():
-    """开启思考时不传任何 extra_body，沿用供应商默认。"""
+async def test_thinking_enabled_sends_provider_specific_params():
+    """开启思考：百炼带 thinking_budget，方舟带 reasoning_effort=high，且互斥。"""
     aliyun = _FakeClient(["ok"])
     providers = [_provider("aliyun", "qwen3.8-flash", thinking_enabled=True)]
-    service = _service(providers, {"aliyun": aliyun})
+    await _service(providers, {"aliyun": aliyun}).gentxt(_request())
+    assert aliyun.calls[0]["extra_body"] == {"enable_thinking": True, "thinking_budget": 2048}
+    assert "reasoning_effort" not in aliyun.calls[0]["extra_body"]
 
-    await service.gentxt(_request())
+    ark = _FakeClient(["ok"])
+    providers = [_provider("ark", "doubao-endpoint", thinking_enabled=True)]
+    await _service(providers, {"ark": ark}).gentxt(_request())
+    assert ark.calls[0]["extra_body"] == {"reasoning_effort": "high"}
+    assert "thinking" not in ark.calls[0]["extra_body"]
+    assert "thinking_budget" not in ark.calls[0]["extra_body"]
 
-    assert "extra_body" not in aliyun.calls[0]
 
-
-async def test_request_max_tokens_overrides_provider_default():
-    """按阶段传入的 max_tokens 优先，供应商级配置不再覆盖它。"""
+async def test_request_max_completion_tokens_overrides_provider_default():
+    """按阶段传入的 max_completion_tokens 优先，且请求体不再出现 max_tokens。"""
     aliyun = _FakeClient(["ok"])
-    providers = [_provider("aliyun", "qwen3.8-flash")]  # provider.max_tokens=16
+    providers = [_provider("aliyun", "qwen3.8-flash")]  # provider.max_completion_tokens=16
     service = _service(providers, {"aliyun": aliyun})
 
-    await service.gentxt(_request())  # request.max_tokens=32
+    await service.gentxt(_request())  # request.max_completion_tokens=32
 
-    assert aliyun.calls[0]["max_tokens"] == 32
+    assert aliyun.calls[0]["max_completion_tokens"] == 32
+    assert "max_tokens" not in aliyun.calls[0]
 
 
 async def test_stream_degrades_when_build_fails():
