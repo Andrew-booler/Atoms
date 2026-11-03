@@ -3,11 +3,20 @@ import json
 import logging
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from core import error_codes
 from core.database import get_db
+from core.exceptions import (
+    AppError,
+    InternalError,
+    NotFoundError,
+    ProviderError,
+    SandboxUnavailableError,
+    ValidationError,
+)
 from models.projects import Projects
 from models.studio_messages import Studio_messages
 from models.studio_versions import Studio_versions
@@ -34,7 +43,8 @@ from schemas.studio import (
     VersionSummary,
 )
 from services import studio_output as studio_ai
-from services.execution import DockerNotAvailableError, ExecutionService
+from services.aihub import AllProvidersFailedError
+from services.execution import ExecutionService
 from services.studio_validation import (
     validate_artifact_html,
     validate_outline_payload,
@@ -62,7 +72,18 @@ async def _commit(db: AsyncSession):
     except Exception as exc:
         await db.rollback()
         logger.exception("Studio持久化失败")
-        raise HTTPException(status_code=500, detail="保存失败，未提交本次变更，请重试") from exc
+        raise InternalError(error_codes.STUDIO_DB_COMMIT_FAILED) from exc
+
+
+def _provider_details(exc: AllProvidersFailedError) -> Dict[str, Any]:
+    """把供应商失败摘要放入 details：保留 provider/model/reason，不含密钥。"""
+    return {
+        "providers": [
+            {"provider": failure.provider, "model": failure.model, "reason": failure.reason}
+            for failure in exc.failures
+        ]
+    }
+
 
 def _parse_meta(raw: Optional[str]) -> Dict[str, Any]:
     if not raw:
@@ -102,7 +123,7 @@ async def _load_project(db: AsyncSession, project_id: int, user_id: str) -> Proj
     )
     project = result.scalar_one_or_none()
     if project is None:
-        raise HTTPException(status_code=404, detail="项目不存在")
+        raise NotFoundError(error_codes.STUDIO_PROJECT_NOT_FOUND)
     return project
 
 
@@ -280,16 +301,23 @@ async def plan(
         raw_plan = await studio_ai.get_provider().plan(
             data.requirement, project_name=project_name, profile=data.profile
         )
-    except HTTPException:
+    except AppError:
         raise
+    except AllProvidersFailedError as exc:
+        logger.error("Studio plan failed: 全部供应商失败")
+        raise ProviderError(
+            error_codes.STUDIO_PLAN_FAILED, details=_provider_details(exc)
+        ) from exc
     except Exception as exc:  # noqa: BLE001
-        logger.error("Studio plan failed: %s", exc, exc_info=True)
-        raise HTTPException(status_code=502, detail=f"计划生成失败，请重试：{exc}") from exc
+        logger.error("Studio plan failed: %s", type(exc).__name__)
+        raise ProviderError(error_codes.STUDIO_PLAN_FAILED) from exc
 
     try:
         payload = validate_plan_payload(raw_plan)
     except ValueError as exc:
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
+        raise ProviderError(
+            error_codes.STUDIO_PLAN_INVALID, details={"reason": str(exc)}
+        ) from exc
     text = _plan_to_text(payload)
     model = studio_ai.resolve_model(data.profile)
 
@@ -340,16 +368,23 @@ async def outline(
             {"summary": data.plan_summary, "steps": []},
             profile=data.profile,
         )
-    except HTTPException:
+    except AppError:
         raise
+    except AllProvidersFailedError as exc:
+        logger.error("Studio outline failed: 全部供应商失败")
+        raise ProviderError(
+            error_codes.STUDIO_OUTLINE_FAILED, details=_provider_details(exc)
+        ) from exc
     except Exception as exc:  # noqa: BLE001
-        logger.error("Studio outline failed: %s", exc, exc_info=True)
-        raise HTTPException(status_code=502, detail=f"界面结构生成失败，请重试：{exc}") from exc
+        logger.error("Studio outline failed: %s", type(exc).__name__)
+        raise ProviderError(error_codes.STUDIO_OUTLINE_FAILED) from exc
 
     try:
         payload = validate_outline_payload(raw)
     except ValueError as exc:
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
+        raise ProviderError(
+            error_codes.STUDIO_OUTLINE_INVALID, details={"reason": str(exc)}
+        ) from exc
     return OutlineResponse(outline=payload, model=studio_ai.resolve_model(data.profile))
 
 
@@ -359,8 +394,8 @@ async def _try_run_preview(db: AsyncSession, html: str, version_id: int) -> Opti
     try:
         execution = await service.run_html(html, version_id)
         return execution.preview_url
-    except DockerNotAvailableError as exc:
-        logger.warning("沙箱不可用，artifact 已保存但预览未启动：%s", exc)
+    except SandboxUnavailableError as exc:
+        logger.warning("沙箱不可用，artifact 已保存但预览未启动：%s", exc.code)
         return None
     except Exception as exc:  # noqa: BLE001
         logger.warning("启动沙箱预览失败：%s", exc, exc_info=True)
@@ -385,7 +420,7 @@ async def artifact(
         ))
         base_version = result.scalar_one_or_none()
         if base_version is None:
-            raise HTTPException(status_code=404, detail="基线版本不存在")
+            raise NotFoundError(error_codes.STUDIO_VERSION_NOT_FOUND)
 
     try:
         artifact_html = await studio_ai.get_provider().artifact(
@@ -396,16 +431,23 @@ async def artifact(
             context=base_version.artifact_html if base_version else None,
             base_version_id=data.base_version_id,
         )
-    except HTTPException:
+    except AppError:
         raise
+    except AllProvidersFailedError as exc:
+        logger.error("Studio artifact failed: 全部供应商失败")
+        raise ProviderError(
+            error_codes.STUDIO_ARTIFACT_FAILED, details=_provider_details(exc)
+        ) from exc
     except Exception as exc:  # noqa: BLE001
-        logger.error("Studio artifact failed: %s", exc, exc_info=True)
-        raise HTTPException(status_code=502, detail=f"产物生成失败，请重试：{exc}") from exc
+        logger.error("Studio artifact failed: %s", type(exc).__name__)
+        raise ProviderError(error_codes.STUDIO_ARTIFACT_FAILED) from exc
 
     try:
         artifact_html = validate_artifact_html(artifact_html)
     except ValueError as exc:
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
+        raise ProviderError(
+            error_codes.STUDIO_ARTIFACT_INVALID, details={"reason": str(exc)}
+        ) from exc
     project = await _load_project(db, project_id, SHARED_CONTEXT)
     plans = (await db.execute(select(Studio_messages).where(
         Studio_messages.project_id == project_id, Studio_messages.kind == "plan"
@@ -497,7 +539,9 @@ async def edit_artifact(
     try:
         html = validate_artifact_html(data.html)
     except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+        raise ValidationError(
+            error_codes.ARTIFACT_INVALID, details={"reason": str(exc)}
+        ) from exc
 
     base_version = None
     if project.current_version:
@@ -579,7 +623,7 @@ async def get_version(
     )
     version = result.scalar_one_or_none()
     if version is None:
-        raise HTTPException(status_code=404, detail="版本不存在")
+        raise NotFoundError(error_codes.STUDIO_VERSION_NOT_FOUND)
     return VersionDetail(
         id=version.id,
         project_id=version.project_id,
@@ -600,16 +644,18 @@ async def run_version(
     result = await db.execute(select(Studio_versions).where(Studio_versions.id == version_id))
     version = result.scalar_one_or_none()
     if version is None:
-        raise HTTPException(status_code=404, detail="版本不存在")
+        raise NotFoundError(error_codes.STUDIO_VERSION_NOT_FOUND)
 
     service = ExecutionService(db)
     try:
         execution = await service.run_html(version.artifact_html, version_id)
-    except DockerNotAvailableError as exc:
-        raise HTTPException(status_code=503, detail=f"沙箱不可用：{exc}") from exc
+    except AppError:
+        raise
     except Exception as exc:  # noqa: BLE001
-        logger.error("启动版本预览失败：%s", exc, exc_info=True)
-        raise HTTPException(status_code=502, detail=f"启动预览失败：{exc}") from exc
+        logger.error("启动版本预览失败：%s", type(exc).__name__)
+        raise SandboxUnavailableError(
+            error_codes.SANDBOX_START_FAILED, details={"reason": type(exc).__name__}
+        ) from exc
 
     return ExecutionResponse(
         id=execution.id,
@@ -630,7 +676,7 @@ async def stop_execution(
     service = ExecutionService(db)
     execution = await service.stop(execution_id)
     if execution is None:
-        raise HTTPException(status_code=404, detail="执行不存在")
+        raise NotFoundError(error_codes.STUDIO_EXECUTION_NOT_FOUND)
     return ExecutionResponse(
         id=execution.id,
         version_id=execution.version_id,
@@ -656,7 +702,7 @@ async def restore_version(
     )
     version = result.scalar_one_or_none()
     if version is None:
-        raise HTTPException(status_code=404, detail="版本不存在")
+        raise NotFoundError(error_codes.STUDIO_VERSION_NOT_FOUND)
 
     if project.current_version == version.version_no:
         return await _summary(db, project)

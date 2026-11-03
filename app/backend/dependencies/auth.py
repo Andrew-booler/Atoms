@@ -3,8 +3,10 @@ import logging
 from datetime import datetime
 from typing import Optional
 
+from core import error_codes
 from core.auth import AccessTokenError, decode_access_token
-from fastapi import Depends, HTTPException, Request, status
+from core.exceptions import AuthError
+from fastapi import Depends, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from schemas.auth import UserResponse
 
@@ -21,7 +23,7 @@ async def get_bearer_token(
         return credentials.credentials
 
     logger.debug("Authentication required for request %s %s", request.method, request.url.path)
-    raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication credentials were not provided")
+    raise AuthError(error_codes.AUTH_REQUIRED)
 
 
 async def get_current_user(token: str = Depends(get_bearer_token)) -> UserResponse:
@@ -31,11 +33,11 @@ async def get_current_user(token: str = Depends(get_bearer_token)) -> UserRespon
     except AccessTokenError as exc:
         # Log error type only, not the full exception which may contain sensitive token data
         logger.warning("Token validation failed: %s", type(exc).__name__)
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=exc.message)
+        raise AuthError(error_codes.AUTH_INVALID_CREDENTIALS) from exc
 
     user_id = payload.get("sub")
     if not user_id:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid authentication token")
+        raise AuthError(error_codes.AUTH_INVALID_CREDENTIALS)
 
     last_login_raw = payload.get("last_login")
     last_login = None
@@ -58,5 +60,5 @@ async def get_current_user(token: str = Depends(get_bearer_token)) -> UserRespon
 async def get_admin_user(current_user: UserResponse = Depends(get_current_user)) -> UserResponse:
     """Dependency to ensure current user has admin role."""
     if current_user.role != "admin":
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required")
+        raise AuthError(error_codes.AUTH_FORBIDDEN, http_status=403)
     return current_user

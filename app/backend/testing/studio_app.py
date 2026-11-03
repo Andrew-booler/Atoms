@@ -10,6 +10,7 @@ from sqlalchemy.pool import NullPool
 from routers import studio
 from services import studio_output
 from core.database import get_db
+from core.exception_handlers import register_exception_handlers
 from models.execution import Execution
 
 SCHEMA = os.environ.get("STUDIO_TEST_SCHEMA", "studio_test_t1")
@@ -82,6 +83,7 @@ async def lifespan(app):
 app = FastAPI(lifespan=lifespan)
 app.dependency_overrides[get_db] = database
 app.include_router(studio.router)
+register_exception_handlers(app)
 
 
 @app.post('/__test/reset')

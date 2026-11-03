@@ -110,18 +110,32 @@ export interface BuildResponse {
   preview_url?: string | null;
 }
 
-const getErrorDetail = (error: unknown): string => {
+export interface ApiErrorBody {
+  code?: string;
+  message?: string;
+  details?: Record<string, unknown>;
+}
+
+const getErrorBody = (error: unknown): ApiErrorBody | undefined => {
   const err = error as {
-    data?: { detail?: string };
-    response?: { data?: { detail?: string } };
+    data?: ApiErrorBody;
+    response?: { data?: ApiErrorBody & { detail?: string }; message?: string };
     message?: string;
   };
-  return (
-    err?.data?.detail || err?.response?.data?.detail || err?.message || '请求失败，请重试'
-  );
+  return err?.data ?? err?.response?.data;
+};
+
+/** 统一错误展示：优先使用后端 ErrorResponse.message，兼容旧版 detail。 */
+const getErrorDetail = (error: unknown): string => {
+  const body = getErrorBody(error);
+  const err = error as { message?: string };
+  return body?.message || (body as { detail?: string } | undefined)?.detail || err?.message || '请求失败，请重试';
 };
 
 export const describeError = getErrorDetail;
+
+/** 需要按错误码分支时使用（如权限、限流）。 */
+export const describeErrorCode = (error: unknown): string | undefined => getErrorBody(error)?.code;
 
 export const studioApi = {
   async models(): Promise<ModelsResponse> {

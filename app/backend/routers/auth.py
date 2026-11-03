@@ -13,10 +13,12 @@ from core.auth import (
     generate_state,
     validate_id_token,
 )
+from core import error_codes
 from core.config import settings
 from core.database import get_db
+from core.exceptions import AppError, AuthError, ProviderError
 from dependencies.auth import get_current_user
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, Request, status
 from fastapi.responses import RedirectResponse
 from schemas.auth import (
     PlatformTokenExchangeRequest,
@@ -227,9 +229,9 @@ async def callback(
     except IDTokenValidationError as e:
         # Redirect to error page with validation details
         return redirect_with_error(f"Authentication failed: {e.message}")
-    except HTTPException as e:
-        # Redirect to error page with the original detail message
-        return redirect_with_error(str(e.detail))
+    except AppError as e:
+        # Redirect to error page with the user-facing Chinese message
+        return redirect_with_error(e.message)
     except Exception as e:
         logger.exception(f"Unexpected error in OIDC callback: {e}")
         return redirect_with_error(
@@ -264,34 +266,27 @@ async def exchange_platform_token(
         logger.debug(f"[token/exchange] Issuer response status: {verify_response.status_code}")
     except httpx.HTTPError as exc:
         logger.error(f"[token/exchange] HTTP error verifying platform token: {exc}", exc_info=True)
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Unable to verify platform token") from exc
+        raise ProviderError(error_codes.AUTH_PROVIDER_UNAVAILABLE) from exc
 
     try:
         verify_body = verify_response.json()
         logger.debug(f"[token/exchange] Issuer response body: {verify_body}")
     except ValueError:
         logger.error(f"[token/exchange] Failed to parse issuer response as JSON: {verify_response.text}")
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail="Invalid response from platform token verification service",
-        )
+        raise ProviderError(error_codes.AUTH_PROVIDER_UNAVAILABLE)
 
     if not isinstance(verify_body, dict):
         logger.error(f"[token/exchange] Unexpected response type: {type(verify_body)}")
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail="Unexpected response from platform token verification service",
-        )
+        raise ProviderError(error_codes.AUTH_PROVIDER_UNAVAILABLE)
 
     if verify_response.status_code != status.HTTP_200_OK or not verify_body.get("success"):
         message = verify_body.get("message", "") if isinstance(verify_body, dict) else ""
         logger.warning(
             f"[token/exchange] Token verification failed: status={verify_response.status_code}, message={message}"
         )
-        raise HTTPException(
-            status_code=verify_response.status_code,
-            detail=message or "Platform token verification failed",
-        )
+        if verify_response.status_code in (status.HTTP_401_UNAUTHORIZED, status.HTTP_403_FORBIDDEN):
+            raise AuthError(error_codes.AUTH_INVALID_CREDENTIALS)
+        raise ProviderError(error_codes.AUTH_PROVIDER_UNAVAILABLE)
 
     payload_data = verify_body.get("data") or {}
     raw_user_id = payload_data.get("user_id")
@@ -299,7 +294,7 @@ async def exchange_platform_token(
 
     if not raw_user_id:
         logger.error("[token/exchange] Platform token payload missing user_id")
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Platform token payload missing user_id")
+        raise AuthError(error_codes.AUTH_INVALID_CREDENTIALS)
 
     platform_user_id = str(raw_user_id)
     is_admin = platform_user_id == str(settings.admin_user_id)

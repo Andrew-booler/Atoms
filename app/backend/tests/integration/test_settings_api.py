@@ -145,7 +145,8 @@ async def test_delete_missing_setting_reports_server_error(api_client, jwt_env, 
 
     # 当前实现把 404 包进通用异常分支，因此对外表现为 500；此断言固定现状。
     assert response.status_code == 500
-    assert "does not exist" in response.json()["detail"]
+    assert response.json()["code"] == "INTERNAL_ERROR"
+    assert response.json()["message"] == "服务器内部错误，请稍后重试。"
 
 
 def test_get_env_file_path_rejects_unknown_type():

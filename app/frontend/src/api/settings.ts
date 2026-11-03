@@ -3,6 +3,16 @@ import { getAPIBaseURL } from '../lib/config';
 // Don't cache the getAPIBase() URL, get it dynamically
 const getAPIBase = () => `${getAPIBaseURL()}/api/v1`;
 
+/** 读取统一错误契约中的 message，失败时回退到调用方文案。 */
+async function errorMessage(response: Response, fallback: string): Promise<string> {
+  try {
+    const body = await response.json();
+    return body?.message || body?.detail || fallback;
+  } catch {
+    return fallback;
+  }
+}
+
 export interface EnvVariable {
   key: string;
   value: string;
@@ -26,7 +36,7 @@ export const settingsApi = {
     });
 
     if (!response.ok) {
-      throw new Error('Failed to fetch configuration');
+      throw new Error(await errorMessage(response, 'Failed to fetch configuration'));
     }
 
     return response.json();
@@ -50,7 +60,7 @@ export const settingsApi = {
     );
 
     if (!response.ok) {
-      throw new Error('Failed to update backend configuration');
+      throw new Error(await errorMessage(response, 'Failed to update backend configuration'));
     }
 
     return response.json();
@@ -74,7 +84,7 @@ export const settingsApi = {
     );
 
     if (!response.ok) {
-      throw new Error('Failed to update frontend configuration');
+      throw new Error(await errorMessage(response, 'Failed to update frontend configuration'));
     }
 
     return response.json();
@@ -98,7 +108,7 @@ export const settingsApi = {
     );
 
     if (!response.ok) {
-      throw new Error('Failed to add backend configuration');
+      throw new Error(await errorMessage(response, 'Failed to add backend configuration'));
     }
 
     return response.json();
@@ -122,7 +132,7 @@ export const settingsApi = {
     );
 
     if (!response.ok) {
-      throw new Error('Failed to add frontend configuration');
+      throw new Error(await errorMessage(response, 'Failed to add frontend configuration'));
     }
 
     return response.json();
@@ -139,7 +149,7 @@ export const settingsApi = {
     );
 
     if (!response.ok) {
-      throw new Error('Failed to delete backend configuration');
+      throw new Error(await errorMessage(response, 'Failed to delete backend configuration'));
     }
 
     return response.json();
@@ -156,7 +166,7 @@ export const settingsApi = {
     );
 
     if (!response.ok) {
-      throw new Error('Failed to delete frontend configuration');
+      throw new Error(await errorMessage(response, 'Failed to delete frontend configuration'));
     }
 
     return response.json();

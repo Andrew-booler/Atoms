@@ -28,7 +28,7 @@ class RPApi {
         return null;
       }
       throw new Error(
-        error.response?.data?.detail || 'Failed to get user info'
+        error.response?.data?.message || error.response?.data?.detail || 'Failed to get user info'
       );
     }
   }
@@ -43,7 +43,7 @@ class RPApi {
       window.location.href = response.data.redirect_url;
     } catch (error) {
       throw new Error(
-        error.response?.data?.detail || 'Failed to initiate login'
+        error.response?.data?.message || error.response?.data?.detail || 'Failed to initiate login'
       );
     }
   }
@@ -56,7 +56,7 @@ class RPApi {
       // The backend will redirect to OIDC provider logout
       window.location.href = response.data.redirect_url;
     } catch (error) {
-      throw new Error(error.response?.data?.detail || 'Failed to logout');
+      throw new Error(error.response?.data?.message || error.response?.data?.detail || 'Failed to logout');
     }
   }
 }

@@ -2,16 +2,17 @@ import importlib
 import logging
 import os
 import pkgutil
-import traceback
 import asyncio
 from contextlib import asynccontextmanager
 from datetime import datetime
 
 from core.config import settings
 from core.environment import get_env_bool
-from fastapi import FastAPI, HTTPException, Request, status
+from core.exception_handlers import register_exception_handlers
+from core.log_redaction import install_sensitive_data_filter
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse
 from fastapi.routing import APIRouter
 from utils.logging_utils import cleanup_old_log_files
 
@@ -48,6 +49,7 @@ def setup_logging():
         ],
     )
     cleanup_old_log_files(log_dir, current_log_file=log_file)
+    install_sensitive_data_filter()
 
     # Set log levels for specific modules
     logging.getLogger("uvicorn").setLevel(logging.DEBUG)
@@ -195,39 +197,7 @@ def include_routers_from_package(app: FastAPI, package_name: str = "routers") ->
 # Setup logging before router discovery
 setup_logging()
 include_routers_from_package(app, "routers")
-
-
-# Add exception handler for all exceptions except HTTPException
-@app.exception_handler(Exception)
-async def general_exception_handler(request: Request, exc: Exception):
-    """Handle all exceptions except HTTPException
-
-    - Dev environment: Return full stack trace and exception details
-    - Prod environment: Return only "Internal server error"
-    """
-    # Re-raise HTTPException to let FastAPI handle it normally
-    if isinstance(exc, HTTPException):
-        raise exc
-
-    logger = logging.getLogger(__name__)
-    error_message = str(exc)
-    error_type = type(exc).__name__
-
-    # Log full error details regardless of environment
-    logger.error(f"Exception: {error_type}: {error_message}\n{traceback.format_exc()}")
-
-    # Determine if we're in dev environment
-    is_dev = os.getenv("ENVIRONMENT", "prod").lower() == "dev"
-
-    if is_dev:
-        # Dev environment: return full stack trace and exception details
-        error_detail = f"{error_type}: {error_message}\n{traceback.format_exc()}"
-        return JSONResponse(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, content={"detail": error_detail})
-    else:
-        # Prod environment: return only generic error message
-        return JSONResponse(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, content={"detail": "Internal Server Error"}
-        )
+register_exception_handlers(app)
 
 
 @app.get("/")

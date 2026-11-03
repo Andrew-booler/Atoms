@@ -93,7 +93,8 @@ async def test_me_requires_bearer_token(api_client, auth_env):
     response = await api_client.get(f"{API}/me")
 
     assert response.status_code == 401
-    assert response.json()["detail"] == "Authentication credentials were not provided"
+    assert response.json()["code"] == "AUTH_REQUIRED"
+    assert response.json()["message"] == "请先登录后再操作。"
 
 
 async def test_me_returns_token_claims(api_client, auth_env):
@@ -199,7 +200,7 @@ async def test_token_exchange_rejects_failed_verification(api_client, auth_env, 
     response = await api_client.post(f"{API}/token/exchange", json={"platform_token": "bad-token"})
 
     assert response.status_code == 401
-    assert response.json()["detail"] == "令牌无效"
+    assert response.json()["code"] == "AUTH_INVALID_CREDENTIALS"
 
 
 async def test_token_exchange_rejects_non_json_response(api_client, auth_env, monkeypatch):
@@ -207,7 +208,7 @@ async def test_token_exchange_rejects_non_json_response(api_client, auth_env, mo
     response = await api_client.post(f"{API}/token/exchange", json={"platform_token": "token"})
 
     assert response.status_code == 502
-    assert "Invalid response" in response.json()["detail"]
+    assert response.json()["code"] == "AUTH_PROVIDER_UNAVAILABLE"
 
 
 async def test_token_exchange_rejects_unexpected_body_type(api_client, auth_env, monkeypatch):
@@ -215,7 +216,7 @@ async def test_token_exchange_rejects_unexpected_body_type(api_client, auth_env,
     response = await api_client.post(f"{API}/token/exchange", json={"platform_token": "token"})
 
     assert response.status_code == 502
-    assert "Unexpected response" in response.json()["detail"]
+    assert response.json()["code"] == "AUTH_PROVIDER_UNAVAILABLE"
 
 
 async def test_token_exchange_rejects_missing_user_id(api_client, auth_env, monkeypatch):
@@ -223,7 +224,7 @@ async def test_token_exchange_rejects_missing_user_id(api_client, auth_env, monk
     response = await api_client.post(f"{API}/token/exchange", json={"platform_token": "token"})
 
     assert response.status_code == 401
-    assert "missing user_id" in response.json()["detail"]
+    assert response.json()["code"] == "AUTH_INVALID_CREDENTIALS"
 
 
 async def test_token_exchange_maps_http_error_to_502(api_client, auth_env, monkeypatch):
@@ -231,7 +232,8 @@ async def test_token_exchange_maps_http_error_to_502(api_client, auth_env, monke
     response = await api_client.post(f"{API}/token/exchange", json={"platform_token": "token"})
 
     assert response.status_code == 502
-    assert response.json()["detail"] == "Unable to verify platform token"
+    assert response.json()["code"] == "AUTH_PROVIDER_UNAVAILABLE"
+    assert response.json()["message"] == "登录服务暂时不可用，请稍后重试。"
 
 
 # ------------------------------------------------------------------ services/auth

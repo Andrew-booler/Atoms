@@ -19,6 +19,7 @@ os.environ.setdefault(
 )
 
 from core.database import get_db  # noqa: E402
+from core.exception_handlers import register_exception_handlers  # noqa: E402
 from models.auth import OIDCState, User  # noqa: E402
 from routers import auth, health  # noqa: E402
 from routers import settings as settings_router  # noqa: E402
@@ -46,6 +47,7 @@ def _api_app() -> FastAPI:
     app.include_router(auth.router)
     app.include_router(health.router)
     app.include_router(settings_router.router)
+    register_exception_handlers(app)
     return app
 
 

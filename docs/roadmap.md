@@ -1,6 +1,6 @@
  # Atoms Studio 后续路线图
 
-> 本路线图记录执行与隔离层（Phase 1）落地之后的分阶段方向。各阶段为用户认可的演进方向，未承诺排期；当前仅 Phase 1 进入实施（见 [execution_sandbox_plan](execution_sandbox_plan.md)）。
+> 本路线图记录执行与隔离层（Phase 1）落地之后的分阶段方向。各阶段为用户认可的演进方向，未承诺排期；当前 Phase 1–4 已完成，Phase 16 已完成（2026-11-04），Phase 17 已定为 P0 前置但尚未开工（见「实现顺序与实施时点」）。
 >
 > 参考来源：Atoms 官网 atomsai.com 与帮助中心 help.atoms.dev 的 Agent 协作、集成、代码编辑、发布等文档。
 
@@ -18,46 +18,160 @@
 | 5 | 多 Agent 协作 | 引入角色体系（Team Leader/PM/Architect/Engineer 等）和 Team Mode，实现 Agent 间交接、提问卡、计划卡审批。把单轮生成升级为团队协作。 | 21 | 3-5 周 | Phase 4 | 方向已确认 |
 | 6 | 工具与集成框架 | 建立工具注册表，支持内置工具、MCP、外部连接器三种来源，Agent 可发现并调用工具。定义统一的执行与权限模型。 | 21 | 3-5 周 | Phase 4（或 Phase 5） | 方向已确认 |
 | 7 | 安全扫描与质量门禁 | 作为内置工具实现安全扫描，构建后/发布前自动检测密钥泄漏、XSS、权限风险，出报告并支持阻断或带风险发布。 | 8 | 1-2 周 | Phase 1, Phase 6 | 方向已确认 |
-| 8 | 生产预览通道 | 通过反向代理/子域名把沙箱端口安全暴露给远程用户，解决 127.0.0.1 仅本机可访问的问题。 | 8 | 1-2 周 | Phase 1 | 方向已确认 |
-| 9 | 发布与部署 | 一键发布到公开 URL，支持自定义域名、暂停/下线、版本回滚、自托管导出。把预览产物变成可对外的正式站点。 | 13 | 2-3 周 | Phase 8, Phase 7 | 方向已确认 |
+| 8 | 生产预览通道 | 通过反向代理/子域名把沙箱端口安全暴露给远程用户，解决 127.0.0.1 仅本机可访问的问题。 | 8 | 1-2 周 | Phase 1 | 暂缓（跳过，2026-11-04 决策：缺域名/DNS/反代外部资源） |
+| 9 | 发布与部署 | 一键发布到公开 URL，支持自定义域名、暂停/下线、版本回滚、自托管导出。把预览产物变成可对外的正式站点。 | 13 | 2-3 周 | Phase 8, Phase 7 | 暂缓（连带于 Phase 8） |
 | 10 | 构建终端与实时反馈 | 预览区旁实时展示构建 stdout/stderr、文件创建、错误日志，让用户看到 Agent 实际在做什么。 | 5 | 约 1 周 | Phase 1 | 方向已确认 |
 | 11 | 知识库与工作区上下文 | 工作区级持久 system prompt + 知识库（RAG）+ 文件引用，所有对话继承上下文，提升生成质量与一致性。 | 13 | 2-3 周 | Phase 4 | 方向已确认 |
 | 12 | 消息队列与任务编排 | Agent 工作中用户可排队后续指令，支持重排、编辑、暂停/恢复，不打断当前任务。 | 5 | 约 1 周 | Phase 5（或 Phase 4） | 方向已确认 |
 | 13 | 用户自选 AI API（能力扩展） | 用户/工作区级配置自己的 base_url + key + model，预设主流 OpenAI 兼容厂商；密钥加密存储、不落日志。 | 8 | 1-2 周 | Phase 4 | 方向已确认 |
 | 14 | 动态后端 / 前后端分离（能力扩展） | 支持生成带后端逻辑的应用（Node/FastAPI），产物有 API + 状态；沙箱扩展为可运行进程 + 出站隔离。 | 21 | 3-5 周 | Phase 1（沙箱扩展） | 方向已确认 |
 | 15 | 多语言 / 多文件项目（能力扩展） | 单文件 HTML → 多文件项目 + 构建流水线（React/Vue 等），含文件树、依赖安装、构建、产物托管闭环。 | 34 | 5 周+ | Phase 1 + Phase 14 | 方向已确认 |
+| 16 | 统一业务异常体系（横切加固） | 建立业务异常基类与分级、错误码-消息映射、全局异常处理器；对外统一返回 `ErrorResponse{code, message, details?}` 而非裸状态码；日志脱敏。牵动 API 错误响应契约与现有测试。 | 5 | 约 1 周 | 无（建议 P0 前置，可早于 Phase 5） | **已完成（2026-11-04）** |
+| 17 | 认证与多用户数据隔离（横切加固） | 登录与会话、数据按 `user_id` 归属、查询强制过滤、历史 `studio-shared` 数据迁移回填、越权访问测试、前后端联调。解决共享账号与数据串用风险。 | 13 | 2-3 周 | 无；建议紧接 Phase 16、早于 Phase 5 | 待排期（建议 P0 前置） |
 
-**合计：约 191 points，约 33-45 周（单人）。** 其中主线 Phase 1-12 约 128 points、能力扩展 Phase 13-15 约 63 points。多人并行可压缩，核心链路（1→2→4→5→6）不可压缩；能力扩展（13→14→15）相对独立、可与主线并行推进。
+**合计：约 209 points，约 36-49 周（单人）。** 其中主线 Phase 1-12 约 128 points、能力扩展 Phase 13-15 约 63 points、横切加固 Phase 16 约 5 points、认证与多用户隔离 Phase 17 约 13 points。多人并行可压缩，核心链路（1→2→4→5→6）不可压缩；能力扩展（13→14→15）相对独立、可与主线并行推进；Phase 16/17 编号追加在末尾，**建议实施时点前置到 Phase 5 之前**（见「实现顺序与实施时点」）。
+
+## 项目痛点归并与落位（2026-11-03 并入）
+
+> 来源：逐条提取 [项目说明](项目说明.md) §二「未完成 / 关键横切缺口」与 §三「后续扩展与优先级判断」，并对照 [需求说明](需求说明.md) §1/§2/§5/§6。归并去重后得 14 条待排期/待办项，另列 6 条已覆盖项。
+
+| # | 痛点（归并去重） | 出处（文件·章节） | 现状判定 | 落位（Phase / 横切） |
+|---|---|---|---|---|
+| P1 | 多用户数据隔离缺失：studio 路由共享 `studio-shared` 数据，未按 `user_id` 过滤 | 项目说明 §二「关键横切缺口」；需求说明 §1 | 待解决 | **Phase 17**（与登录/会话合并实施，2026-11-04 决策） |
+| P2 | 服务端速率限制缺失（auth 防暴力破解、artifact/build 防 DoS） | 项目说明 §二；本文件 NFR P0 | 待解决（原定 Phase 1 同期未落地） | 横切 P0，与 Phase 16 同期补 |
+| P3 | 请求体大小限制缺失（`artifact_html` 无上限） | 项目说明 §二；本文件 NFR P0 | 待解决（原定 Phase 1 同期未落地） | 横切 P0，与 Phase 16 同期补 |
+| P4 | CORS 未收紧（`allow_origin_regex=".*"` + 凭据） | 项目说明 §二；本文件 NFR P0 | 待解决（原定 Phase 1 同期未落地） | 横切 P0，与 Phase 16 同期补 |
+| P5 | AI 密钥轮换缺失 | 项目说明 §二；本文件 NFR P1「密钥管理」 | 待解决 | 横切 P1，Phase 16 或 Phase 5 前 |
+| P6 | AI token 用量与成本追踪缺失 | 项目说明 §二 | 待解决 | Phase 9「成本控制」 |
+| P7 | CI 流水线缺失（无 `.github/workflows`） | 项目说明 §二；本文件「代码质量门禁」P1 | 待解决 | 横切 P0/P1，先建骨架 |
+| P8 | 后端 lint/format 缺失（无 ruff/black 配置） | 项目说明 §二；门禁 P0 | 待解决 | 横切 P0，与 Phase 16 同期 |
+| P9 | 后端类型检查缺失（无 mypy 配置） | 项目说明 §二；门禁 P1 | 待解决 | 横切 P1，Phase 5 前 |
+| P10 | 覆盖率阈值门禁缺失（`.coveragerc` 无 `fail_under`） | 项目说明 §二；门禁 P0 | 待解决 | 横切 P0，与 Phase 16 同期 |
+| P11 | Phase 5–12 未实施（多 Agent/工具框架/安全扫描/生产预览/发布/终端/知识库/队列） | 项目说明 §二「未完成」 | 待排期（方向已确认） | 既有 Phase 5–12 |
+| P12 | 无登录/认证/租户体系（共享账号、无登录入口） | 需求说明 §1「产品目标和边界」、阅读背景 | 本阶段有意不提供；对外前需补 | **Phase 17**（与 P1 多用户隔离合并为同一件事实施，2026-11-04 决策） |
+| P13 | 错误协议只回 HTTP 状态码 + 固定文案（422/404/502/500），用户看不懂 | 需求说明 §5「当前规则与限制·错误协议」 | 待解决（2026-11-03 新需求） | **Phase 16** 统一业务异常体系 |
+| P14 | 后端无自动化测试入口（文档记 18 条设计用例未建立） | 需求说明 §6「验证与追溯」；后端测试计划 §5-P3 | **已解决**：`app/backend/tests/` 已建立，2026-11-04 收集 127 条（单元 77、接口集成 50） | 已覆盖；相关文档已于 2026-11-04 同步 |
+
+### 已覆盖 / 已完成的痛点（不重复排期）
+
+| 痛点 | 出处 | 结论 |
+|---|---|---|
+| 沙箱资源隔离（只读挂载、`--cap-drop=ALL`、CPU/内存/PID 限额） | 项目说明 §一、§二；本文件 NFR P0 | ✅ 已完成（Phase 1） |
+| 产物脱离主站同源渲染（iframe `srcDoc` → 沙箱 `preview_url`） | 项目说明 §一 | ✅ 已完成（Phase 1） |
+| 孤儿沙箱容器 / 工作区回收 | 本文件 NFR P2「孤儿资源回收」 | ✅ 已覆盖（Phase 1 回收器 + 兜底守卫） |
+| 三阶段编排 + 产物校验（错误可独立定位） | 项目说明 §一「关键取舍」 | ✅ 已完成（Phase 1–4） |
+| 真实 AI 接入 + 限流指数退避 | 项目说明 §一、§二 | ✅ 已完成（Phase 4） |
+| 单镜像部署（Fly.io + Docker DinD） | 项目说明 §二/§三；需求说明 §2「部署仍为占位」 | ✅ 已落地：`Dockerfile` + `fly.toml`（app `atoms-services`、区域 `sin`）+ `.github/workflows/fly-deploy.yml`；产品内 `/deploy` 页面仍是占位（发布能力未实现） |
+
+## Phase 顺序评估与调整说明（2026-11-04 更新）
+
+**结论**：
+1. **现有 Phase 1–16 一律不重排（有意保持不动）**。多篇文档按数字引用 Phase（项目说明「Phase 1–4 / Phase 5–12」、[执行与隔离层设计](执行与隔离层设计.md) Phase 1、后端测试计划等），重排会造成大量悬空引用与文档漂移。
+2. **新增 Phase 17（认证与多用户数据隔离）**，编号追加在末尾；按 2026-11-04 决策，登录/认证与多用户数据隔离合并为同一件事，不再作为两个独立事项。
+3. **Phase 16 与 Phase 17 均建议实施时点前置到 Phase 5 之前**——编号顺序与实施时点解耦，从根本上规避重编号冲突。具体落地顺序见「实现顺序与实施时点」。
+4. 其余痛点全部落入既有 Phase 或横切 NFR 表，不新增其它 Phase 编号。
+
+**紧迫度与用户体验影响评估**：
+
+| 候选项 | 紧迫度 | 用户体验影响 | 结论 |
+|---|---|---|---|
+| 统一业务异常体系（Phase 16） | 高（对外前必须，错误不可读直接损可用性） | 高（用户只看到裸错误码） | 前置，P0，最先做 |
+| 认证与多用户数据隔离（Phase 17） | 高（对外/多用户前必须，数据串用属事故级风险） | 高（无登录入口，任何人可见全部数据） | 紧随 Phase 16，P0 |
+| P0 横切（限流/请求体/CORS/lint/覆盖率门禁） | 高（原定 Phase 1 同期，已逾期） | 中（安全与稳定性，非直接可见） | 与 Phase 16 同期补 |
+| Phase 5 多 Agent、Phase 6 工具框架 | 中（依赖已满足） | 高（产品差异化） | 保持原序 |
+| Phase 13–15 能力扩展 | 中低（相对独立） | 高（长期价值） | 保持原序，可并行 |
+
+**有意保持不动的顺序**：Phase 2 优先于 Phase 3（既有理由不变）；Phase 10 可纳入 Phase 1 一并做的提示不变；Phase 6 可从 Phase 5 提前到 Phase 4 的弹性不变。
+
+### 文档同步结果（2026-11-04 已完成）
+
+上一版本本节登记为「待跟进」，2026-11-04 已按下表完成同步（只改 docs 下 Markdown，未动代码、未提交 git）：
+
+| 文件 | 位置 | 已更新内容 |
+|---|---|---|
+| docs/项目说明.md | §二「当前完成程度」、§三「建议优先级」 | 「Phase 5–12」扩为「Phase 5–12、16、17」；补 Phase 16/17 建议 P0 前置；把已完成的 Fly.io 部署与后端测试移出「未完成」 |
+| docs/需求说明.md | §1、§2、§5、§6、§7 | 认证边界改为「本阶段未提供，Phase 17 对外前实施」；部署占位区分为「产品页面占位 / 平台自身已部署」；错误协议登记目标契约与当前实现差异；后端测试计数按实际更新 |
+| docs/测试用例与覆盖矩阵.md | §2.3、§2.4、§4、§6 | 后端测试计数按实际更新；新增「错误契约」用例类别与计数（规划中，未建立） |
+| docs/执行与隔离层设计.md | §3、§8、§10 | 沙箱错误改为统一 code（`SANDBOX_DOCKER_UNAVAILABLE`、`SANDBOX_IMAGE_PULL_FAILED`），并标注 Phase 16 实施前仍为现状行为；测试计数按实际更新 |
+| docs/后端测试覆盖与大厂规范落地计划.md | 文首、§1、§5-P3 | 增加 2026-11-04 现状更新；P3 已落地；异常体系测试纳入后端测试落地清单 |
+| docs/开发规范.md | §3、§4、§5 | 命名规则改为摘要 + 指向《命名规范》；错误契约与错误码规范更新；后端测试现状更新 |
+| docs/命名规范.md | 新建 | 迁入散落在开发规范/总架构中的命名规则，新增 `DOMAIN_REASON` 错误码规范 |
+| docs/总架构设计.md | §4、目录树、§12 | 命名章节改为摘要 + 链接；后端测试目录与接口集成状态改为实际 |
+| docs/README.md | 查阅建议、模块索引、交付边界 | 登记《命名规范》；更新计数与状态 |
+
+## 实现顺序与实施时点
+
+**建议落地顺序（按紧迫度与用户影响，而非 Phase 编号）**：
+
+| 顺序 | 内容 | 对应 Phase | 建议时点 | 前置依赖 | 理由 / 状态 |
+|---|---|---|---|---|---|
+| 1 | 执行与隔离层（Docker 沙箱 + `preview_url`） | Phase 1 | 已完成 | 无 | 所有预览、构建终端与动态后端能力的底座，已落地 |
+| 2 | 多轮迭代回路（按修改意见生成新版本） | Phase 2 | 已完成 | Phase 1 | 已落地；真实模式下的上下文改稿在 Phase 4 后生效 |
+| 3 | 代码编辑器（CodeMirror，源码编辑保存为新版本） | Phase 3 | 已完成 | Phase 1 | 已落地；文件树/Diff/编辑会话留待后续扩展 |
+| 4 | 真实 AI Provider（多供应商主备 + 示例短路） | Phase 4 | 已完成（2026-11-04 实测可用） | Phase 2 或 Phase 3 | 已落地；百炼与方舟均已实测返回非空正文 |
+| 5 | 统一业务异常体系（`ErrorResponse{code,message,details?}`） | Phase 16 | 立即（P0） | 无 | 错误可读性直接决定可用性；越晚改回归面越大 |
+| 6 | 认证与多用户数据隔离（登录/会话 + `user_id` 过滤） | Phase 17 | 紧接 Phase 16，Phase 5 之前 | 无（依赖 Phase 16 的错误契约） | 共享账号与数据串用属事故级风险，对外前必须 |
+| 7 | P0 横切补强（限流、请求体上限、CORS 收紧、lint/覆盖率门禁） | 横切 NFR（非 Phase） | 与 Phase 16/17 同期 | Phase 16（共用异常与路由改造面） | 安全稳定底线，原定 Phase 1 同期、已逾期 |
+| 8 | 多 Agent 协作（角色体系 + 编排器 + 交接/审批） | Phase 5 | Phase 17 之后 | Phase 4 | 核心差异化能力，但先保证可安全对外 |
+| 9 | 工具与集成框架（内置工具、MCP、外部连接器） | Phase 6 | Phase 5 之后（可提前做内置工具） | Phase 4（或 Phase 5） | 多 Agent 需要工具才能落地；先内置后扩展 |
+| 10 | 安全扫描与质量门禁（密钥泄漏、XSS、权限风险） | Phase 7 | Phase 6 之后、发布前 | Phase 1、Phase 6 | 作为内置工具实现；为 Phase 9 发布提供门禁 |
+| 11 | 生产预览通道（子域名/反代暴露沙箱） | Phase 8 | **跳过 / 暂缓** | Phase 1 | 需域名 + DNS/反向代理等外部资源，当前不具备；见下方恢复条件 |
+| 12 | 发布与部署（公开 URL、自定义域名、回滚、自托管导出） | Phase 9 | **暂缓（连带于 Phase 8）** | Phase 8、Phase 7 | 依赖生产预览通道；Phase 8 暂缓则本项无法独立开工 |
+| 13 | 构建终端与实时反馈（stdout/stderr、文件创建、错误日志） | Phase 10 | 与 Phase 5/6 并行，或 Phase 6 之后 | Phase 1 | 只依赖沙箱与任务执行，可较早做；提升「Agent 在做什么」的可见性 |
+| 14 | 知识库与工作区上下文（持久 prompt + RAG + 文件引用） | Phase 11 | Phase 4 之后，可与 Phase 5/6 并行 | Phase 4 | 依赖真实 AI；提升生成质量与跨对话一致性 |
+| 15 | 消息队列与任务编排（排队、重排、暂停/恢复） | Phase 12 | Phase 5 稳定后 | Phase 5（或 Phase 4） | 需多 Agent/长任务才有排队价值；过早做缺少真实队列场景 |
+| 16 | 用户自选 AI API（工作区级 base_url + key + model） | Phase 13 | 可与主线并行 | Phase 4 | 相对独立，不阻塞对外关键路径；可在 Phase 16/17 后随时插入 |
+| 17 | 动态后端 / 前后端分离（Node/FastAPI 产物 + 出站隔离） | Phase 14 | Phase 7 之后或与能力扩展并行 | Phase 1（沙箱扩展） | 高风险高成本，需先有安全扫描与沙箱扩展基础 |
+| 18 | 多语言 / 多文件项目（多文件 + 构建流水线） | Phase 15 | Phase 14 之后 | Phase 1 + Phase 14 | 依赖动态后端与多文件沙箱，属长期能力 |
+
+**该表覆盖 Phase 1–17 全部，无遗漏项**（Phase 8、9 以「跳过/暂缓」保留在表中，不从表中消失）。
+
+**Phase 8 跳过 / 暂缓说明（用户决策）**：
+
+- **跳过原因**：生产预览通道需要可用域名、DNS 解析与反向代理/子域名路由等外部资源，当前不具备；继续实施会产生外部依赖与环境不确定性，投入产出比低。
+- **恢复条件**：具备可解析域名与反向代理（或云厂商子域名/路由能力）、明确对外访问范围与安全边界后，再重新评估；Phase 1 的沙箱能力已就绪，恢复时无需重做底座。
+- **连带影响**：Phase 9（发布与部署）依赖 Phase 8，**随之暂缓**；Phase 7 安全扫描仍可先做（作为内置工具），不必等待 8/9。用户自选 API、动态后端等能力（Phase 13/14）不依赖 8/9，可照常并行。
+
+
+**为什么编号与实施时点解耦**：Phase 编号已被多篇文档按数字引用（项目说明、执行与隔离层设计、后端测试计划等）。若把 Phase 16/17 插到中间重排 1–16，会产生大量悬空引用与文档漂移。因此新增能力一律追加编号（16、17），只在本文登记「建议实施时点」，编号保持历史稳定、时点随紧迫度调整。读者只需记住：**16 → 17 → 5 → 6 → 7 → 10/11/12 → 13/14 → 15** 是实际落地主线，**8/9 暂缓**。
+
+**这样排的理由（按紧迫度与用户影响）**：
+
+1. **错误可读性直接决定产品可用性**：用户看到 422/502 裸状态码无法自助处理，客服与重试成本高，且属于对外第一印象问题，故最先做。
+2. **认证与数据隔离是事故级风险**：当前所有使用者共享 `studio-shared` 数据，任何人可读写他人项目；一旦对外，数据串用不可接受，故紧随其后。
+3. **先错误体系、后认证**：401/403/429 等分支需要统一错误契约承载；顺序颠倒会导致认证接口先写一套 `detail`、再返工。
+4. **横切 P0 可并行**：限流、请求体上限、CORS、lint/覆盖率门禁与 Phase 16/17 改动面重叠（同批路由与异常处理），同批做最省成本。
+5. **主线与能力扩展不抢占对外关键路径**：Phase 5 多 Agent 价值高但不解决安全问题，排在其后；Phase 13–15 可与主线并行，不阻塞。
 
 ## 非功能性需求（横切关注点）
 
-以下 NFR 不单独成 Phase，而是嵌入到对应 Phase 中实施。按优先级排列，P0 必须在 Phase 1 前或同期落地。
+以下 NFR 不单独成 Phase，而是嵌入到对应 Phase 中实施。按优先级排列，**P0 必须在对外使用前落地**；其中多项原定 Phase 1 前/同期，已逾期，2026-11-04 调整为与 Phase 16 同期补。
 
-### P0 — 基础安全与隔离（Phase 1 前/同期）
+### P0 — 基础安全与隔离（原定 Phase 1 前/同期，已逾期）
 
 | 项 | 当前状态 | 目标 | 落地 Phase |
 |---|---|---|---|
-| CORS 收紧 | `allow_origin_regex=".*"` + 凭据 | 生产环境限制为前端域名，dev 放开 | Phase 1 同期 |
-| 请求体大小限制 | artifact_html 无上限 | 限制 artifact 最大体积（如 5MB），超限 413 | Phase 1 同期 |
-| 速率限制 | 无 | auth 接口防暴力破解；artifact/build 接口防 DoS；按 IP + 用户限流 | Phase 1 同期 |
-| 沙箱资源隔离 | 未实施 | Docker `--read-only`、`--cap-drop=ALL`、CPU/内存/PID 限制、只读挂载 | Phase 1（已在计划中） |
-| artifact HTML 安全 | 仅校验结构 | 沙箱内渲染（脱离主站同源）+ 发布前安全扫描 | Phase 1 + Phase 7 |
+| CORS 收紧 | `allow_origin_regex=".*"` + 凭据 | 生产环境限制为前端域名，dev 放开 | 与 Phase 16 同期（已逾期） |
+| 请求体大小限制 | artifact_html 无上限 | 限制 artifact 最大体积（如 5MB），超限 413 `ARTIFACT_TOO_LARGE` | 与 Phase 16 同期（已逾期） |
+| 速率限制 | 无 | auth 接口防暴力破解；artifact/build 接口防 DoS；按 IP + 用户限流 | 与 Phase 16 同期（已逾期） |
+| 沙箱资源隔离 | ✅ 已实施 | Docker `--read-only`、`--cap-drop=ALL`、CPU/内存/PID 限制、只读挂载 | Phase 1（已完成） |
+| artifact HTML 安全 | 沙箱内渲染已实施；发布前扫描未实施 | 沙箱内渲染（脱离主站同源）+ 发布前安全扫描 | Phase 1（已完成）+ Phase 7（待排期） |
 
 ### P1 — 多用户与数据安全（随核心功能落地）
 
 | 项 | 当前状态 | 目标 | 落地 Phase |
 |---|---|---|---|
-| 多用户数据隔离 | studio 路由共享 `studio-shared` 数据 | 按 user_id 隔离项目/消息/版本，查询带 user 过滤 | Phase 4 前后（真实用户接入时） |
-| 服务端并发控制 | 仅前端 busy 状态 | 同项目构建加服务端锁（DB 行锁或 Redis），防止并发写冲突 | Phase 2（多轮迭代引入并发风险时） |
+| 多用户数据隔离 | studio 路由共享 `studio-shared` 数据 | 按 user_id 隔离项目/消息/版本，查询带 user 过滤；与登录/会话合并实施 | Phase 17（2026-11-04 决策；早于 Phase 5） |
+| 服务端并发控制 | 仅前端 busy 状态 | 同项目构建加服务端锁（DB 行锁或 Redis），防止并发写冲突 | Phase 2 已过（未实施），待排期，建议 Phase 5 前 |
 | 安全响应头 | 主应用缺失 | 加 CSP、HSTS、X-Content-Type-Options、Referrer-Policy | Phase 8（生产预览通道上线前） |
 | 审计日志 | 仅有应用日志 | 记录关键操作（登录、构建、发布、配置变更）的 actor + 时间 + 对象 | Phase 5（多 Agent 引入更多操作时） |
-| 密钥管理 | 仅 env 读取 | JWT/OIDC/AI key 不进日志、提供轮换机制 | Phase 4（接真实 AI 时） |
+| 密钥管理 | ✅ env 隔离已实施（`app/.env`）；轮换机制缺失 | JWT/OIDC/AI key 不进日志、提供轮换机制 | Phase 4（env 隔离已完成）；轮换待排期 |
 
 ### P2 — 生产就绪（发布/部署阶段）
 
 | 项 | 目标 | 落地 Phase |
 |---|---|---|
-| 成本控制 | 追踪每轮 AI token 用量与沙箱资源消耗，设用户/工作区配额 | Phase 9 |
+| 成本控制 | 追踪每轮 AI token 用量与沙箱资源消耗，设用户/工作区配额；台账见 [AI 额度使用记录](AI额度使用记录.md) | Phase 9 |
 | 可观测性 | 结构化日志 + 请求指标 + 链路追踪（现有 telemetry 模块扩展） | Phase 8 前 |
 | 孤儿资源回收 | 沙箱容器/工作区/数据库连接泄漏兜底清理 | Phase 1（已含回收器）+ 持续 |
 | 备份与恢复 | 数据库定期备份、项目版本可恢复 | Phase 9 |
@@ -68,35 +182,39 @@
 ```
 Phase 1  ── 沙箱隔离 + CORS + 限流 + 请求体限制
 Phase 2  ── 服务端并发锁
-Phase 4  ── 密钥管理 + 多用户数据隔离
+Phase 4  ── 密钥管理
 Phase 5  ── 审计日志
 Phase 7  ── artifact 安全扫描
 Phase 8  ── 安全响应头 + 可观测性
 Phase 9  ── 成本控制 + 备份恢复
+Phase 16 ── 统一错误响应契约 + 前端可读错误 + 日志脱敏
+Phase 17 ── 登录/会话 + 多用户数据隔离 + 越权访问控制
 ```
 
 > **说明**：当前应用尚未跑过自动化安全扫描（SAST/DAST）。Phase 7 的安全扫描工具是面向"产物 HTML"的；对"平台自身代码"的安全扫描建议在 Phase 8/9 前引入 CI 级别的 SAST（如 Semgrep/Bandit）和依赖审计（pip-audit），作为质量门禁的一部分。
 
 ## 代码质量门禁（横切关注点）
 
-命名规范、代码分层、测试分层已写入 [开发规范](../docs/开发规范.md) 与 [测试策略与规范](../docs/测试策略与规范.md)。以下是**可执行的质量门禁**，当前大部分缺失，需在 Phase 1 同期建立，贯穿后续所有 Phase。
+命名规范、代码分层、测试分层已写入 [命名规范](命名规范.md)、[开发规范](开发规范.md) 与 [测试策略与规范](测试策略与规范.md)。以下是**可执行的质量门禁**，当前大部分缺失，需在 Phase 16 同期建立，贯穿后续所有 Phase。
 
 ### 当前状态
 
 | 项 | 状态 |
 |---|---|
-| 命名规范 | ✅ 已写入开发规范 |
+| 命名规范 | ✅ 已独立维护于 [命名规范](命名规范.md) |
 | 代码分层与依赖方向 | ✅ 已写入开发规范 |
 | 前端 ESLint | ✅ 已有 `eslint.config.js` |
 | 后端 lint/format | ❌ 无 ruff/flake8/black 配置 |
 | 后端类型检查 | ❌ 无 mypy 配置 |
 | 测试覆盖率阈值 | ❌ `.coveragerc` 无 `fail_under`，无最低覆盖率要求 |
-| CI 流水线 | ❌ 无 `.github/workflows` |
+| CI 流水线 | ⚠️ 仅有 `.github/workflows/fly-deploy.yml`（push 即部署，无 lint/test/coverage/build 阶段） |
 | pre-commit hooks | ❌ 无配置 |
 | 依赖审计 | ❌ 无 pip-audit / npm audit |
 | SAST | ❌ 无 Semgrep / Bandit |
 
-### P0 — Phase 1 同期必须建立
+> 2026-11-04 核实：`app/backend/tests/`、`pytest.ini`、`.coveragerc` 已存在；`pytest.ini` 默认带 `--cov` 但无阈值；CI 只有一个 Fly.io 部署工作流。
+
+### P0 — 与 Phase 16 同期必须建立（原定 Phase 1 同期，已逾期）
 
 | 门禁 | 要求 | 落地方式 |
 |---|---|---|
@@ -110,8 +228,8 @@ Phase 9  ── 成本控制 + 备份恢复
 | 门禁 | 要求 | 落地 Phase |
 |---|---|---|
 | 后端类型检查 | 核心模块（`core/`、`services/`）通过 mypy | Phase 4（接真实 AI 前，类型边界更重要） |
-| CI 流水线 | GitHub Actions：lint → test → coverage → build，PR 必过 | Phase 1 同期建立骨架，Phase 4 前完善 |
-| pre-commit hooks | 提交前自动 ruff format + ruff check，防止未格式化代码入库 | Phase 1 同期 |
+| CI 流水线 | GitHub Actions：lint → test → coverage → build，PR 必过 | Phase 16 同期建立骨架，Phase 5 前完善 |
+| pre-commit hooks | 提交前自动 ruff format + ruff check，防止未格式化代码入库 | Phase 16 同期 |
 | 依赖审计 | 后端 `pip-audit`、前端 `npm audit`，高危依赖阻断合并 | Phase 4（接真实 AI/外部工具前） |
 
 ### P2 — 生产就绪
@@ -124,7 +242,7 @@ Phase 9  ── 成本控制 + 备份恢复
 
 ### 与已有文档的关系
 
-- 命名规范、代码分层、测试分层：继续沿用 [开发规范](../docs/开发规范.md) 与 [测试策略与规范](../docs/测试策略与规范.md)，不重复。
+- 命名规范、代码分层、测试分层：命名沿用 [命名规范](命名规范.md)，分层沿用 [开发规范](开发规范.md) 与 [测试策略与规范](测试策略与规范.md)，不重复。
 - 本节补充的是**可执行门禁**（工具+阈值+CI），是对现有规范的落地保障。
 - 覆盖率阈值建议：先设整体 70%、核心模块 80%，随 Phase 推进逐步提高，避免一开始因阈值过高阻碍开发。
 
@@ -138,6 +256,8 @@ Phase 9  ── 成本控制 + 备份恢复
 - 依赖关系上，两者都只依赖 Phase 1（执行与隔离层），互不依赖，因此可以按用户价值排序，多轮回路的用户价值更高。
 
 排序后的实施顺序：Phase 1 → Phase 2 → Phase 3 → Phase 4 → Phase 5 → Phase 6 → Phase 7 / Phase 8 → Phase 9 → Phase 10 / Phase 11 / Phase 12。
+
+> Phase 16（统一业务异常体系）与 Phase 17（认证与多用户数据隔离）为横切加固，建议在 Phase 5 前依次实施；其编号追加在末尾仅为稳定引用，不参与上述主线排序（见「实现顺序与实施时点」）。
 
 ## 依赖关系验证
 
@@ -255,8 +375,19 @@ Phase 9  ── 成本控制 + 备份恢复
 
 ### Phase 4：真实 AI Provider
 - **当前 mock 已增强为示例驱动：** `services/studio_examples.py` 提供 4 个完整可交互示范网页（饮水追踪器 / 任务看板 / 记账本 / 读书笔记库）与一个通用演示页；`MockOutputProvider` 按需求命中示例返回对应三件套（plan / outline / html），未命中返回通用页。接真实 Provider 后，若用户输入与示例文本相同，应**短路返回对应示范网页**，不调用真实模型，保证首体验稳定。
-- **状态：已完成。** `services/studio_output.py` 中 `RealOutputProvider` 实现为真实调用 `services/studio_ai.py` 的编排层（`generate_plan` / `generate_outline` / `generate_artifact`），并保留示例短路：任一方法先 `match_example(requirement)`，命中即返回对应示范网页（`deepcopy` 隔离 plan/outline，html 原样返回），不调用真实模型。启用方式为环境变量 `APP_AI_BASE_URL` + `APP_AI_KEY`（二者齐备才启用），`get_provider()` 据此惰性返回 `RealOutputProvider` 或回退 `MockOutputProvider`；`resolve_model()` / `available_models()` 按同样开关分派到 `studio_ai` 或返回 mock 模型（`mock-fixed-v1`）。真实模型的模型列表由 `studio_ai.MODEL_PROFILES` 维护（balanced / fast / quality 三档），密钥经 `core/config.py` 的 `settings.app_ai_key` 动态读取环境变量，不写死在代码里。`generate_artifact` 支持 `context`（基线 HTML）参数，使 Phase 2 的"按上下文智能修改"在真实模式下生效。
-- `services/studio_ai.py` 通过 `AIHubService`（OpenAI 兼容 `AsyncOpenAI`，`base_url=APP_AI_BASE_URL` + `api_key=APP_AI_KEY`）完成三次模型调用，并对产物做 `sanitize_html()` 清洗（带一次失败重试）。
+- **状态：已完成。** `services/studio_output.py` 中 `RealOutputProvider` 实现为真实调用 `services/studio_ai.py` 的编排层（`generate_plan` / `generate_outline` / `generate_artifact`），并保留示例短路：任一方法先 `match_example(requirement)`，命中即返回对应示范网页（`deepcopy` 隔离 plan/outline，html 原样返回），不调用真实模型。启用方式为「任一 AI 供应商（aliyun / ark / zhipu）配置完整即启用」（见 `services/aihub._build_providers`），`get_provider()` 据此惰性返回 `RealOutputProvider` 或回退 `MockOutputProvider`；`resolve_model()` / `available_models()` 按同样开关分派到 `studio_ai` 或返回 mock 模型（`mock-fixed-v1`）。真实档位由 `studio_ai.MODEL_PROFILES` 维护（balanced / fast / quality 三档，主选模型 `qwen3.8-flash`），密钥只经环境变量注入、各家独立，不写死在代码里。`generate_artifact` 支持 `context`（基线 HTML）参数，使 Phase 2 的"按上下文智能修改"在真实模式下生效。
+- `services/studio_ai.py` 通过 `AIHubService` 完成三次模型调用，并对产物做 `sanitize_html()` 清洗（带一次失败重试）。**调用层已升级为多供应商主备降级**：`aliyun`（阿里百炼 Qwen3.8-Flash，主选）→ `ark`（火山方舟 doubao，备选）→ `zhipu`（智谱 GLM-4.7-Flash，兜底），任一家缺失 `base_url`/`api_key`/`model` 自动跳过。触发降级的条件：429、5xx、超时、连接错误、空响应；**401/403 认证类错误立即降级、不重试**；逐级落到下一家，全部失败抛 `AllProvidersFailedError`（携带逐家供应商与失败原因，不含密钥）。每家独立 `base_url`/`api_key`/`model`/`max_tokens`/并发上限/超时、独立重试计数与独立并发信号量。环境变量见 `app/.env.example`：
+  - 阿里百炼：`APP_AI_ALIYUN_BASE_URL` 使用**工作区专属 MaaS 域名** `https://ws-8mf1tjg3auks3710.cn-beijing.maas.aliyuncs.com/compatible-mode/v1`（不是公共 `dashscope.aliyuncs.com`；`app/.env.example` 里的公共域名只是示例默认值，实际以 `app/.env` 配置为准）、`APP_AI_ALIYUN_API_KEY`、`APP_AI_ALIYUN_MODEL`（`qwen3.8-flash`）。**已验证（2026-11-04 实测）**：该域名 + 模型返回正文非空，耗时 7.63s。注意两种域名权限不通用：同一模型在公共域名 `dashscope.aliyuncs.com` 返回 403 `AccessDenied.Unpurchased`（账号未在公共域名开通），不能把公共域名当作可用的等价配置。
+  - 火山方舟：`APP_AI_ARK_BASE_URL`（默认 `https://ark.cn-beijing.volces.com/api/v3`）、`APP_AI_ARK_API_KEY`、`APP_AI_ARK_MODEL`（填推理接入点 ID `ep-xxx` 或模型 ID，无默认值，必须显式配置）。**已验证（2026-11-04 实测）**：`deepseek-v4-1-flash-economy-261017` 返回 200、耗时 2.08s、正文非空、`finish_reason=stop`。该模型默认开启 thinking，**`max_tokens` 过小（如 32）会被 reasoning 全部吃光，导致 `content` 为空**；配置 `max_tokens` 时必须为推理留出余量，或在需要正文时避免过小上限。
+  - 智谱兜底：`APP_AI_ZHIPU_*`；未配置时回退读取历史 `APP_AI_BASE_URL` / `APP_AI_KEY`。
+  - 全局：`APP_AI_PROVIDER_ORDER`（默认 `aliyun,ark,zhipu`）、`APP_AI_MAX_RETRIES`、`APP_AI_RETRY_BASE`、`APP_AI_RETRY_MAX`、`APP_AI_MAX_CONCURRENCY`。
+  - 安全：密钥仅经环境变量注入，日志只记录供应商名、模型与错误类型，不打印密钥。
+- **实测记录（2026-11-04，已验证）**：
+  1. 阿里百炼：工作区 MaaS 域名 + `qwen3.8-flash` → 可用，正文非空，耗时 7.63s。
+  2. 公共域名 `dashscope.aliyuncs.com` + 同一模型 → 403 `AccessDenied.Unpurchased`（账号未在公共域名开通）；**两种域名权限不通用**，配置必须用工作区 MaaS 域名。
+  3. 火山方舟：`deepseek-v4-1-flash-economy-261017` → 200、2.08s、正文非空、`finish_reason=stop`；该模型默认开启 thinking，`max_tokens` 过小（如 32）会被 reasoning 全部占用，导致 `content` 为空。
+  4. 降级语义：401/403 立即降级且不重试；全部供应商失败时抛 `AllProvidersFailedError`。
+- **thinking 与预算（2026-11-04 更新）**：调用层新增 `APP_AI_ENABLE_THINKING`（默认 `false`）。关闭时对支持的供应商显式传禁用参数（百炼 `extra_body={"enable_thinking": false}`、方舟 `extra_body={"thinking": {"type": "disabled"}}`），其它供应商不传，避免 400；开启时不传，沿用供应商默认。Studio 三个阶段预算改为可配置且互不影响：`APP_STUDIO_PLAN_MAX_TOKENS`（默认 1600）、`APP_STUDIO_OUTLINE_MAX_TOKENS`（默认 2200）、`APP_STUDIO_ARTIFACT_MAX_TOKENS`（默认 6144）；按阶段传入的 `max_tokens` 优先于供应商级 `APP_AI_*_MAX_TOKENS`，避免全局覆盖把 plan/outline 也压小。`app/.env.example` 已同步说明。
 - 替换 `MockOutputProvider` 已完成，Plan/Outline/HTML 响应形状不变，上层流程无感知。
 - **决策点（Phase 4 启动时定，已收敛）**：
   - 模型选型：需确认是否支持 **function-calling / tool use**（直接影响 Phase 5 多 Agent 交接和 Phase 6 工具调用）。
@@ -364,6 +495,94 @@ Phase 9  ── 成本控制 + 备份恢复
 - Agent 工作中，用户可输入后续指令并排队，不打断当前任务。
 - 队列支持：重排、编辑、删除、暂停处理、恢复处理、立即发送。
 - 依赖：Phase 5（多 Agent 协作，队列主要在多任务场景有价值）。
+
+### Phase 16：统一业务异常体系（横切加固，建议 P0 前置）
+
+> 新增于 2026-11-03；**已完成于 2026-11-04**。编号追加在末尾以避免改动现有 Phase 1–15 的大量引用；实际建议实施时点早于 Phase 5（多用户 / 对外），见「实现顺序与实施时点」。
+
+**此前现状（本阶段已解决）**：报错只返回 HTTP 状态码 + 固定 detail 文案（需求说明 §5：字段无效 422、不存在 404、阶段/结构无效 502、DB 提交失败 500），前端只能展示裸错误，用户看不懂。
+
+**目标**：建立完整业务异常体系——遇到错误 `throw` 对应异常，异常 message 简洁但说清问题相关信息；API 统一返回 `ErrorResponse{code, message, details?}`，而非裸错误码。错误码采用 `DOMAIN_REASON`（如 `STUDIO_BUILD_FAILED`），message 为中文可读句子，不引入 i18n key、不做中英双语；**契约一次到位直接切换，不做 `detail` 双写过渡**。
+
+**可执行条目**：
+
+| 序号 | 条目 | 落地内容 | 交付物 |
+|---|---|---|---|
+| 16-1 | 异常基类与分级 | `AppError(code, message, http_status, details?, retryable=False)`；子类：`ValidationError(422)`、`NotFoundError(404)`、`ConflictError(409)`、`RateLimitError(429)`、`PayloadTooLargeError(413)`、`AuthError(401/403)`、`ProviderError(502)`、`SandboxUnavailableError(503)`、`InternalError(500)`。现有 `ValueError` / `DockerNotAvailableError` / `HTTPException` 逐点迁移 | `app/backend/core/exceptions.py` |
+| 16-2 | 错误码与 message 映射 | 集中错误码常量（如 `STUDIO_PLAN_INVALID`、`STUDIO_OUTLINE_INVALID`、`STUDIO_ARTIFACT_INVALID`、`STUDIO_DB_COMMIT_FAILED`、`SANDBOX_DOCKER_UNAVAILABLE`、`SANDBOX_IMAGE_PULL_FAILED`、`ARTIFACT_TOO_LARGE`、`RATE_LIMITED`、`AUTH_INVALID_CREDENTIALS`、`AUTH_REQUIRED`、`AUTH_FORBIDDEN`、`INTERNAL_ERROR`）；每码对应中文可读 message，占位参数受控（禁止拼接堆栈 / SQL / 绝对路径）。命名规则见[命名规范](命名规范.md) §6 | `app/backend/core/error_codes.py` |
+| 16-3 | 全局异常处理器 | 注册 `AppError` / `AllProvidersFailedError` / `RequestValidationError` / `HTTPException` / 兜底 `Exception` 处理器，统一输出契约；未知异常对外回 `INTERNAL_ERROR` 通用文案、对内留脱敏堆栈 | `app/backend/core/exception_handlers.py`（main 与测试宿主共用） |
+| 16-4 | 对外响应契约与前端展示 | 定义 `ErrorResponse{code, message, details?}`；前端 `src/lib/api.ts` 与 `StudioOperation` 按 `code` 展示可读文案，未知码兜底 `INTERNAL_ERROR` | `app/backend/schemas/errors.py`、`src/lib/api.ts`、前端错误展示组件 |
+| 16-5 | 日志与敏感信息脱敏 | 日志只记 `code` / 端点 / 摘要；不打印 `DATABASE_URL`、AI key、Authorization、artifact 全文；`details` 过滤 password / token / api_key | `app/backend/core/log_redaction.py`、异常处理器 |
+| 16-6 | 测试覆盖 | 单元：异常基类 / 映射 / 处理器；集成：各状态码分支返回 `{code,message}`；前端：错误展示改为 `message` 优先 | `app/backend/tests/unit/test_exceptions.py`、`tests/integration/test_error_contract.py`、前端错误解析工具 |
+
+**实施结果（2026-11-04）**：
+
+- 新增 `core/error_codes.py`（31 个 DOMAIN_REASON 码 + 中文 message 唯一来源）、`core/exceptions.py`（分级与 details 脱敏）、`core/exception_handlers.py`（统一注册）、`core/log_redaction.py`、`schemas/errors.py`。
+- `main.py` 与接口测试宿主统一调用 `register_exception_handlers`，避免线上与测试契约漂移。
+- studio / studio_ai / execution / auth / 依赖注入的错误分支迁移为 `AppError`；`AllProvidersFailedError` 保留逐家 provider/model/reason（脱敏）。
+- 前端 `studio.ts` / `auth.ts` / `settings.ts` 改为 `message` 优先，并提供 `describeErrorCode`。
+- 单测 112 条通过；新增错误契约集成用例 4 条通过；接口集成共 54 条，其余因本机 PostgreSQL/Docker 不可用未完整执行（见测试执行记录）。
+
+**影响面（已完成同步）**：
+
+- **API 响应契约变更**：所有错误响应从 `{"detail": ...}` 直接切换为 `ErrorResponse{code, message, details?}`，**未做双写过渡**。
+- **现有测试**：后端错误断言已改为断言 `code` / `message`；未迁移的模板路由由全局 `HTTPException` 处理器映射为中文通用文案。
+- **前端**：`StudioOperation` 的错误捕获与展示、表单与预览的错误提示改为读取 `message`。
+- **文档**：需求说明 §5 错误协议、测试矩阵、开发规范、命名规范已同步。
+
+**决策已收敛（2026-11-04 用户拍板）**：
+
+| 决策点 | 结论 |
+|---|---|
+| 是否保留 `detail` 兼容字段 | **不保留，直接切换**，一次到位为 `ErrorResponse{code, message, details?}` |
+| message 语言策略 | **仅中文**，写成用户能直接看懂的句子；不用 i18n key、不做中英双语 |
+| 错误码命名规范 | **`DOMAIN_REASON`**（如 `STUDIO_BUILD_FAILED`），详见[命名规范](命名规范.md) §6 |
+| 是否引入 `request_id` | **已决策暂缓**（见下方暂缓条目） |
+
+**已决策暂缓：`request_id`（2026-11-04）**
+
+- 决策：本轮**不引入** `request_id`，响应结构固定为 `ErrorResponse{code, message, details?}`。
+- 暂缓理由：引入 `request_id` 需要新增一层中间件贯穿请求生命周期、注入日志上下文并同步改造日志格式与测试断言；当前优先级是「让错误先可读」，少这一层中间件可以更快落地，也避免错误契约一次改动面过大。
+- 保留与不删除：本条不因暂缓而删除；后续引入时的落位为：新增请求 ID 中间件 → 异常处理器写入 `request_id` → `ErrorResponse` 增加 `request_id` 字段 → 日志与前端错误提示展示该 ID。届时需重新评估对 11 个接口与前端错误展示的改动面。
+
+**建议时点**：P0 前置，早于 Phase 5（多用户 / 对外），且早于 Phase 17（认证与多用户隔离）。越晚改，错误契约被越多代码与测试依赖，回归成本越高。
+
+### Phase 17：认证与多用户数据隔离（横切加固，建议 P0 前置）
+
+> 新增于 2026-11-04。按用户决策，登录/认证与多用户数据隔离**合并为同一件事实施**，不再作为两个独立事项；编号追加在末尾，建议实施时点紧随 Phase 16、早于 Phase 5（见「实现顺序与实施时点」）。
+
+**现状**：产品不提供登录入口；Studio 业务路由统一使用 `SHARED_CONTEXT = "studio-shared"` 读写 `projects` / `studio_messages` / `studio_versions`，不按 `user_id` 过滤。模板侧的认证路由与 `AuthContext` 仍存在，但不构成产品登录入口，Studio 数据也不归属任何真实用户。
+
+**目标**：引入登录与会话，使 Studio 数据按登录用户归属并在所有查询上强制过滤；历史共享数据完成迁移与回填；补齐越权测试与前后端联调。所有认证失败分支沿用 Phase 16 的 `ErrorResponse` 契约（`AUTH_REQUIRED` 401、`AUTH_FORBIDDEN` 403）。
+
+**可执行条目**：
+
+| 序号 | 条目 | 落地内容 | 交付物 |
+|---|---|---|---|
+| 17-1 | 登录与会话 | 提供登录页与登录/登出/会话校验接口；签发与校验会话 token；未登录访问 Studio 接口返回 401 `AUTH_REQUIRED`。复用模板 `routers/auth.py` / `services/auth.py` 的既有能力时，须先裁剪到产品所需范围，不整包引入模板用户管理 | `app/frontend/src/pages`、`routers/auth.py`、`services/auth.py` |
+| 17-2 | 数据按 `user_id` 归属 | `projects` / `studio_messages` / `studio_versions`（以及 `executions`）明确归属字段；新记录写入当前登录用户的 `user_id`，移除业务路由中的 `SHARED_CONTEXT` 常量 | `models/*`、`routers/studio.py` |
+| 17-3 | 查询强制过滤 | 所有 Studio 读写查询按当前 `user_id` 过滤；`_load_project` 校验归属，跨用户访问默认返回 403 `AUTH_FORBIDDEN`（决策点 4，启动前定；不返回他人资源内容）；禁止客户端传入 `user_id` 覆盖当前会话 | `routers/studio.py` |
+| 17-4 | 历史数据迁移与回填 | Alembic 迁移新增/收紧归属字段与索引；把既有 `studio-shared` 历史记录回填到指定账户；回填脚本可重复执行、有回滚说明；不触碰生产 `public` 数据，测试 schema 不受影响 | `app/backend/alembic/versions/*`、回填脚本 |
+| 17-5 | 越权访问测试 | 集成测试：A 用户不能读/写/删/恢复 B 用户的项目与版本；未登录返回 401；伪造/传入他人 `user_id` 无效；列表只返回本人项目 | `app/backend/tests/integration/test_studio_authz.py` |
+| 17-6 | 前后端联调 | 登录页、会话保持、未登录跳转、401 后刷新会话；错误按 `code` 展示；登录后完整走通「需求 → 计划 → 构建 → 预览 → 版本恢复」链路，并补一条界面集成用例 | 前端页面与 `tests/studio.integration.spec.ts` |
+
+**影响面（排期必须评估）**：
+
+- **数据库结构变更**：新增归属字段与索引属于生产表结构变更，必须先做迁移评审与回填演练；这是本项目首次修改 `projects` / `studio_messages` / `studio_versions` 结构。
+- **现有接口与测试**：11 个 Studio 接口全部要求登录态；前端集成 35 条需补充登录前置或测试宿主注入固定用户；后端 50 条接口集成需按 `user_id` 隔离数据。
+- **前端**：新增登录页与会话上下文；`StudioOperation` 需处理 401（跳转登录或提示会话失效）。
+- **越权语义**：需在启动前明确「跨用户访问返回 404 还是 403」，避免前端出现「资源不存在」与「无权限」两套文案混用（建议 403 + `AUTH_FORBIDDEN`，仅对确实不存在的资源返回 404）。
+- **模板代码取舍**：模板认证与用户管理属于「产品暂未使用」能力，Phase 17 只取会话与凭据校验所需部分，不把租户、角色、用户管理后台一并纳入。
+
+**依赖与决策点（启动前定）**：
+
+1. 会话方案：JWT 无状态 vs 服务端会话表（影响登出失效与多设备策略）。
+2. 登录方式：仅用户名/密码，还是同时支持邮箱验证码或第三方 OAuth。
+3. 历史数据回填目标账户：回填到哪个账户、是否需要保留一个「历史共享数据」只读归属。
+4. 跨用户访问返回 404 还是 403（建议 403）。
+5. 是否同期引入会话过期与刷新机制。
+
+**建议时点**：Phase 16 完成之后、Phase 5 之前（对外/多用户前必须）。越晚做，数据归属字段与查询过滤需要覆盖的代码路径越多，回填风险越大。
 
 ## Atoms 已实现但我们尚未规划的产品点（备忘）
 

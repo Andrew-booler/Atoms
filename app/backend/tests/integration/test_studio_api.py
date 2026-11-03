@@ -161,7 +161,9 @@ async def test_integration_06_commit_failure_rolls_back(client):
 
     created = await client.post(f"{API}/projects", json={"name": "应失败", "description": ""})
     assert created.status_code == 500
-    assert "保存失败" in created.json()["detail"]
+    body = created.json()
+    assert body["code"] == "STUDIO_DB_COMMIT_FAILED"
+    assert "保存数据失败" in body["message"]
 
     listing = await client.get(f"{API}/projects")
     assert listing.json() == []
@@ -253,15 +255,17 @@ async def test_integration_11_stage_failures_map_502(client):
     project = (await client.post(f"{API}/projects", json={"name": "失败", "description": ""})).json()
     pid = project["id"]
 
-    # 提供者失败 → HTTPException 原样透传 502
+    # 提供者失败 → 统一契约 502
     await client.post("/__test/fault", json={"stage": "plan", "mode": "fail", "remaining": 1})
     resp = await client.post(f"{API}/projects/{pid}/plan", json={"requirement": "做个演示页"})
     assert resp.status_code == 502
+    assert resp.json()["code"] == "STUDIO_PLAN_FAILED"
 
     await client.post("/__test/fault", json={"stage": "outline", "mode": "fail", "remaining": 1})
     resp = await client.post(f"{API}/projects/{pid}/outline",
                              json={"requirement": "做个演示页", "plan_summary": "x"})
     assert resp.status_code == 502
+    assert resp.json()["code"] == "STUDIO_OUTLINE_FAILED"
 
     await client.post("/__test/fault", json={"stage": "artifact", "mode": "fail", "remaining": 1})
     resp = await client.post(
@@ -269,17 +273,20 @@ async def test_integration_11_stage_failures_map_502(client):
         json={"requirement": "做个演示页", "plan_summary": "x", "outline": {"title": "t", "sections": []}},
     )
     assert resp.status_code == 502
+    assert resp.json()["code"] == "STUDIO_ARTIFACT_FAILED"
 
     # 计划结构无效 → 校验失败 502
     await client.post("/__test/fault", json={"stage": "plan", "mode": "invalid", "remaining": 1})
     resp = await client.post(f"{API}/projects/{pid}/plan", json={"requirement": "做个演示页"})
     assert resp.status_code == 502
+    assert resp.json()["code"] == "STUDIO_PLAN_INVALID"
 
     # 界面结构无效 → 校验失败 502
     await client.post("/__test/fault", json={"stage": "outline", "mode": "invalid", "remaining": 1})
     resp = await client.post(f"{API}/projects/{pid}/outline",
                              json={"requirement": "做个演示页", "plan_summary": "x"})
     assert resp.status_code == 502
+    assert resp.json()["code"] == "STUDIO_OUTLINE_INVALID"
 
     # 产物 HTML 无效 → 校验失败 502
     await client.post("/__test/fault", json={"stage": "artifact", "mode": "invalid", "remaining": 1})
@@ -288,18 +295,21 @@ async def test_integration_11_stage_failures_map_502(client):
         json={"requirement": "做个演示页", "plan_summary": "x", "outline": {"title": "t", "sections": []}},
     )
     assert resp.status_code == 502
+    assert resp.json()["code"] == "STUDIO_ARTIFACT_INVALID"
 
     # 提供者抛出非 HTTP 异常 → 兜底 502（对账错误信息）
     await client.post("/__test/fault", json={"stage": "plan", "mode": "crash", "remaining": 1})
     resp = await client.post(f"{API}/projects/{pid}/plan", json={"requirement": "做个演示页"})
     assert resp.status_code == 502
-    assert "计划生成失败" in resp.json()["detail"]
+    assert resp.json()["code"] == "STUDIO_PLAN_FAILED"
+    assert "生成计划失败" in resp.json()["message"]
 
     await client.post("/__test/fault", json={"stage": "outline", "mode": "crash", "remaining": 1})
     resp = await client.post(f"{API}/projects/{pid}/outline",
                              json={"requirement": "做个演示页", "plan_summary": "x"})
     assert resp.status_code == 502
-    assert "界面结构生成失败" in resp.json()["detail"]
+    assert resp.json()["code"] == "STUDIO_OUTLINE_FAILED"
+    assert "生成大纲失败" in resp.json()["message"]
 
     await client.post("/__test/fault", json={"stage": "artifact", "mode": "crash", "remaining": 1})
     resp = await client.post(
@@ -307,7 +317,8 @@ async def test_integration_11_stage_failures_map_502(client):
         json={"requirement": "做个演示页", "plan_summary": "x", "outline": {"title": "t", "sections": []}},
     )
     assert resp.status_code == 502
-    assert "产物生成失败" in resp.json()["detail"]
+    assert resp.json()["code"] == "STUDIO_ARTIFACT_FAILED"
+    assert "生成页面失败" in resp.json()["message"]
 
 
 # 集成-12：artifact base_version_id —— 迭代生成新版本并记录基线

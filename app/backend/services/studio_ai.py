@@ -12,10 +12,16 @@ import os
 import re
 from typing import Any, Dict, List, Optional
 
-from fastapi import HTTPException
-
+from core import error_codes
+from core.exceptions import ProviderError
 from schemas.aihub import ChatMessage, GenTxtRequest
 from services.aihub import AIHubService, AI_MAX_RETRIES, _backoff_seconds
+
+#: 各阶段结构化输出失败时使用的错误码：(通用失败, 内容无效)。
+_STAGE_ERROR_CODES: Dict[str, tuple[str, str]] = {
+    "plan": (error_codes.STUDIO_PLAN_FAILED, error_codes.STUDIO_PLAN_INVALID),
+    "outline": (error_codes.STUDIO_OUTLINE_FAILED, error_codes.STUDIO_OUTLINE_INVALID),
+}
 
 logger = logging.getLogger(__name__)
 
@@ -159,17 +165,19 @@ async def _gentxt_json(
     system: str,
     user: str,
     *,
+    stage: str,
     model: str,
     max_tokens: int,
     required: List[str],
     temperature: float = 0.6,
 ) -> Dict[str, Any]:
+    failure_code, invalid_code = _STAGE_ERROR_CODES[stage]
     raw = await _gentxt(
         system, user, model=model, max_tokens=max_tokens, temperature=temperature
     )
     payload_text = _extract_json_block(raw)
     if not payload_text.strip():
-        raise HTTPException(status_code=502, detail="AI 返回空响应，请稍后重试")
+        raise ProviderError(failure_code, details={"stage": stage, "reason": "empty_response"})
 
     payload: Optional[Dict[str, Any]] = None
     try:
@@ -190,9 +198,13 @@ async def _gentxt_json(
         try:
             parsed = json.loads(_extract_json_block(repaired))
         except json.JSONDecodeError as exc:
-            raise HTTPException(status_code=502, detail="AI 输出解析失败，请重试") from exc
+            raise ProviderError(
+                invalid_code, details={"stage": stage, "reason": "json_parse_failed"}
+            ) from exc
         if not isinstance(parsed, dict) or any(field not in parsed for field in required):
-            raise HTTPException(status_code=502, detail="AI 输出字段不完整，请重试")
+            raise ProviderError(
+                invalid_code, details={"stage": stage, "reason": "missing_fields"}
+            )
         payload = parsed
 
     return payload
@@ -275,7 +287,8 @@ async def generate_plan(
 
 要求：steps 为 3-5 个，必须是实现该需求真正需要的步骤，不要写“需求分析”这种空话。"""
     payload = await _gentxt_json(
-        PROMPT_SYSTEM, user, model=model, max_tokens=_stage_max_tokens("plan"), required=["summary", "steps"]
+        PROMPT_SYSTEM, user, stage="plan", model=model,
+        max_tokens=_stage_max_tokens("plan"), required=["summary", "steps"],
     )
     return _normalize_plan(payload)
 
@@ -301,7 +314,8 @@ async def generate_outline(
 
 要求：sections 为 3-5 个；内容要具体，能直接写成界面，不要抽象占位。"""
     payload = await _gentxt_json(
-        PROMPT_SYSTEM, user, model=model, max_tokens=_stage_max_tokens("outline"), required=["title", "sections"]
+        PROMPT_SYSTEM, user, stage="outline", model=model,
+        max_tokens=_stage_max_tokens("outline"), required=["title", "sections"],
     )
     return _normalize_outline(payload)
 
@@ -349,6 +363,7 @@ async def generate_artifact(
         try:
             return sanitize_html(repaired)
         except ValueError as exc:
-            raise HTTPException(
-                status_code=502, detail="生成的产物不完整，请重试或换一个模型"
+            raise ProviderError(
+                error_codes.STUDIO_ARTIFACT_INVALID,
+                details={"stage": "artifact", "reason": "invalid_html"},
             ) from exc
