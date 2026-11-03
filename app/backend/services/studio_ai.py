@@ -8,6 +8,7 @@
 import asyncio
 import json
 import logging
+import os
 import re
 from typing import Any, Dict, List, Optional
 
@@ -60,6 +61,21 @@ ARTIFACT_SYSTEM = """你是资深前端工程师，负责把产品需求实现�
 def _profile(profile: Optional[str]) -> Dict[str, str]:
     key = (profile or DEFAULT_PROFILE).strip()
     return MODEL_PROFILES.get(key, MODEL_PROFILES[DEFAULT_PROFILE])
+
+
+# 各阶段输出预算：可用环境变量覆盖，避免硬编码；plan/outline 保持原值，
+# artifact 需要容纳完整单文件 HTML（thinking 已默认关闭，不额外占用预算）。
+STAGE_MAX_TOKENS_DEFAULTS: Dict[str, int] = {"plan": 1600, "outline": 2200, "artifact": 6144}
+
+
+def _stage_max_tokens(stage: str) -> int:
+    raw = os.environ.get(f"APP_STUDIO_{stage.upper()}_MAX_TOKENS")
+    if raw and raw.strip():
+        try:
+            return int(raw)
+        except ValueError:
+            pass
+    return STAGE_MAX_TOKENS_DEFAULTS[stage]
 
 
 def resolve_model(profile: Optional[str] = None) -> str:
@@ -259,7 +275,7 @@ async def generate_plan(
 
 要求：steps 为 3-5 个，必须是实现该需求真正需要的步骤，不要写“需求分析”这种空话。"""
     payload = await _gentxt_json(
-        PROMPT_SYSTEM, user, model=model, max_tokens=1600, required=["summary", "steps"]
+        PROMPT_SYSTEM, user, model=model, max_tokens=_stage_max_tokens("plan"), required=["summary", "steps"]
     )
     return _normalize_plan(payload)
 
@@ -285,7 +301,7 @@ async def generate_outline(
 
 要求：sections 为 3-5 个；内容要具体，能直接写成界面，不要抽象占位。"""
     payload = await _gentxt_json(
-        PROMPT_SYSTEM, user, model=model, max_tokens=2200, required=["title", "sections"]
+        PROMPT_SYSTEM, user, model=model, max_tokens=_stage_max_tokens("outline"), required=["title", "sections"]
     )
     return _normalize_outline(payload)
 
@@ -317,7 +333,7 @@ async def generate_artifact(
 界面语言与需求语言保持一致。现在直接输出 HTML。"""
 
     raw = await _gentxt(
-        ARTIFACT_SYSTEM, user, model=model, max_tokens=6144, temperature=0.7
+        ARTIFACT_SYSTEM, user, model=model, max_tokens=_stage_max_tokens("artifact"), temperature=0.7
     )
     try:
         return sanitize_html(raw)
@@ -327,7 +343,7 @@ async def generate_artifact(
             "上一次输出不是完整 HTML。请重新输出完整文档，从 <!DOCTYPE html> 开始、到 </html> 结束，只输出 HTML。\n\n需求："
             + requirement,
             model=model,
-            max_tokens=6144,
+            max_tokens=_stage_max_tokens("artifact"),
             temperature=0.4,
         )
         try:

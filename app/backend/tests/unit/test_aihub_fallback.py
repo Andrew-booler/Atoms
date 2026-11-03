@@ -90,7 +90,7 @@ def _request() -> GenTxtRequest:
     )
 
 
-def _provider(name: str, model: str) -> aihub.ProviderConfig:
+def _provider(name: str, model: str, *, thinking_enabled: bool = False) -> aihub.ProviderConfig:
     return aihub.ProviderConfig(
         name=name,
         base_url=f"https://{name}.example/v1",
@@ -99,6 +99,7 @@ def _provider(name: str, model: str) -> aihub.ProviderConfig:
         max_tokens=16,
         max_concurrency=1,
         timeout=5.0,
+        thinking_enabled=thinking_enabled,
     )
 
 
@@ -130,6 +131,7 @@ def _auth_error() -> Exception:
 
 _ENV_KEYS = [
     "APP_AI_PROVIDER_ORDER",
+    "APP_AI_ENABLE_THINKING",
     "APP_AI_ALIYUN_BASE_URL",
     "APP_AI_ALIYUN_API_KEY",
     "APP_AI_ALIYUN_MODEL",
@@ -268,6 +270,60 @@ async def test_all_providers_fail_raises_with_details():
     assert "RateLimitError" in failures[0].reason
     assert "InternalServerError" in failures[1].reason
     assert "APITimeoutError" in failures[2].reason
+
+
+# ==================== 思考开关与预算 ====================
+
+
+def test_build_providers_reads_thinking_switch(clean_env):
+    """APP_AI_ENABLE_THINKING 默认关闭；显式开启后构建出的供应商均带上开关状态。"""
+    clean_env.setenv("APP_AI_ALIYUN_API_KEY", "aliyun-key")
+    clean_env.setenv("APP_AI_ARK_API_KEY", "ark-key")
+    clean_env.setenv("APP_AI_ARK_MODEL", "ep-test-endpoint")
+
+    default_providers = aihub._build_providers()
+    assert all(p.thinking_enabled is False for p in default_providers)
+
+    clean_env.setenv("APP_AI_ENABLE_THINKING", "true")
+    enabled_providers = aihub._build_providers()
+    assert all(p.thinking_enabled is True for p in enabled_providers)
+
+
+async def test_thinking_disabled_sends_extra_body_per_provider():
+    """默认关闭思考：百炼/方舟各传自己的禁用参数，智谱不传。"""
+    aliyun = _FakeClient(["ok"])
+    await _service([_provider("aliyun", "qwen3.8-flash")], {"aliyun": aliyun}).gentxt(_request())
+    assert aliyun.calls[0]["extra_body"] == {"enable_thinking": False}
+
+    ark = _FakeClient(["ok"])
+    await _service([_provider("ark", "doubao-endpoint")], {"ark": ark}).gentxt(_request())
+    assert ark.calls[0]["extra_body"] == {"thinking": {"type": "disabled"}}
+
+    zhipu = _FakeClient(["ok"])
+    await _service([_provider("zhipu", "glm-4.7-flash")], {"zhipu": zhipu}).gentxt(_request())
+    assert "extra_body" not in zhipu.calls[0]
+
+
+async def test_thinking_enabled_sends_no_extra_body():
+    """开启思考时不传任何 extra_body，沿用供应商默认。"""
+    aliyun = _FakeClient(["ok"])
+    providers = [_provider("aliyun", "qwen3.8-flash", thinking_enabled=True)]
+    service = _service(providers, {"aliyun": aliyun})
+
+    await service.gentxt(_request())
+
+    assert "extra_body" not in aliyun.calls[0]
+
+
+async def test_request_max_tokens_overrides_provider_default():
+    """按阶段传入的 max_tokens 优先，供应商级配置不再覆盖它。"""
+    aliyun = _FakeClient(["ok"])
+    providers = [_provider("aliyun", "qwen3.8-flash")]  # provider.max_tokens=16
+    service = _service(providers, {"aliyun": aliyun})
+
+    await service.gentxt(_request())  # request.max_tokens=32
+
+    assert aliyun.calls[0]["max_tokens"] == 32
 
 
 async def test_stream_degrades_when_build_fails():

@@ -94,6 +94,13 @@ AI_RETRY_MAX_SECONDS = float(os.environ.get("APP_AI_RETRY_MAX", "30.0"))
 # 供应商优先级：主选 → 备选 → 兜底，可用 APP_AI_PROVIDER_ORDER 调整。
 AI_PROVIDER_ORDER = os.environ.get("APP_AI_PROVIDER_ORDER", "aliyun,ark,zhipu")
 
+# 思考（reasoning）开关：默认关闭。关闭时对支持的供应商显式传禁用参数，
+# 避免 reasoning 占用 completion 预算导致长 HTML 被截断；开启时不传，沿用供应商默认。
+THINKING_DISABLE_BODY: Dict[str, Dict[str, Any]] = {
+    "aliyun": {"enable_thinking": False},
+    "ark": {"thinking": {"type": "disabled"}},
+}
+
 
 def _backoff_seconds(attempt: int) -> float:
     """指数退避 + 全抖动，避免固定间隔重试造成惊群。
@@ -131,9 +138,20 @@ def _env_float(name: str, default: Optional[float]) -> Optional[float]:
         return default
 
 
+def _env_bool(name: str, default: bool = False) -> bool:
+    raw = os.environ.get(name)
+    if raw is None or not raw.strip():
+        return default
+    return raw.strip().lower() in ("1", "true", "yes", "on")
+
+
 @dataclass(frozen=True)
 class ProviderConfig:
-    """单个 AI 供应商的独立配置（缺失 base_url/api_key/model 任一项则整家跳过）。"""
+    """单个 AI 供应商的独立配置（缺失 base_url/api_key/model 任一项则整家跳过）。
+
+    max_tokens 仅作为请求未显式指定时的兜底，不再覆盖按阶段传入的值。
+    thinking_enabled 为 False 时，对支持的供应商（aliyun/ark）显式禁用思考。
+    """
 
     name: str
     base_url: str
@@ -142,6 +160,13 @@ class ProviderConfig:
     max_tokens: Optional[int] = None
     max_concurrency: int = AI_MAX_CONCURRENCY
     timeout: float = 60.0
+    thinking_enabled: bool = False
+
+    def thinking_extra_body(self) -> Optional[Dict[str, Any]]:
+        """按供应商返回 extra_body；不支持或未关闭思考时返回 None（不传，避免 400）。"""
+        if self.thinking_enabled:
+            return None
+        return THINKING_DISABLE_BODY.get(self.name)
 
 
 @dataclass(frozen=True)
@@ -166,6 +191,7 @@ def _build_providers() -> List[ProviderConfig]:
     """按优先级从环境变量构建供应商链；缺失 base_url/api_key/model 的整家跳过。"""
     order = os.environ.get("APP_AI_PROVIDER_ORDER", AI_PROVIDER_ORDER)
     wanted = [item.strip().lower() for item in order.split(",") if item.strip()]
+    thinking_enabled = _env_bool("APP_AI_ENABLE_THINKING", False)
     providers: List[ProviderConfig] = []
     for name in wanted:
         if name == "aliyun":
@@ -202,6 +228,7 @@ def _build_providers() -> List[ProviderConfig]:
                 max_tokens=_env_int(f"{prefix}_MAX_TOKENS", None),
                 max_concurrency=_env_int(f"{prefix}_MAX_CONCURRENCY", AI_MAX_CONCURRENCY) or AI_MAX_CONCURRENCY,
                 timeout=_env_float(f"{prefix}_TIMEOUT", 60.0) or 60.0,
+                thinking_enabled=thinking_enabled,
             )
         )
     return providers
@@ -297,20 +324,25 @@ class AIHubService:
         client = self._client_for(provider)
         messages = [self._convert_message(msg) for msg in request.messages]
         model = provider.model
-        max_tokens = provider.max_tokens if provider.max_tokens is not None else request.max_tokens
+        # 按阶段传入的 max_tokens 优先；供应商级配置仅作兜底，避免全局覆盖各阶段预算。
+        max_tokens = request.max_tokens if request.max_tokens is not None else provider.max_tokens
+        extra_body = provider.thinking_extra_body()
+        create_kwargs: Dict[str, Any] = {
+            "model": model,
+            "messages": messages,
+            "temperature": request.temperature,
+            "max_tokens": max_tokens,
+            "stream": stream,
+        }
+        if extra_body:
+            create_kwargs["extra_body"] = extra_body
 
         attempt = 0
         while True:
             try:
                 async with _get_semaphore(provider):
                     return await observe_external_http(
-                        client.chat.completions.create(
-                            model=model,
-                            messages=messages,
-                            temperature=request.temperature,
-                            max_tokens=max_tokens,
-                            stream=stream,
-                        )
+                        client.chat.completions.create(**create_kwargs)
                     )
             except retryable as exc:
                 if attempt >= AI_MAX_RETRIES:
