@@ -16,6 +16,8 @@ class Execution(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True, autoincrement=True, nullable=False)
     version_id: Mapped[int] = mapped_column(Integer, index=True, nullable=False)
     container_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    # 沙箱 uuid（容器名即 atoms-sandbox-{sandbox_id}，工作区目录同名）
+    sandbox_id: Mapped[Optional[str]] = mapped_column(String(16), nullable=True)
     port: Mapped[int] = mapped_column(Integer, nullable=False)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="running")
     preview_url: Mapped[str] = mapped_column(String(255), nullable=False)

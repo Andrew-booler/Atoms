@@ -16,8 +16,10 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
 
+from core import error_codes
 from core.config import settings
 from core.environment import get_env_int
+from core.exceptions import SandboxUnavailableError
 from models.execution import Execution
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -25,6 +27,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 logger = logging.getLogger(__name__)
 
 CONTAINER_PREFIX = "atoms-sandbox-"
+
+# 容器标签：孤儿清理按 label 精确匹配，不再依赖名称子串
+CONTAINER_LABEL = "atoms.sandbox"
+CONTAINER_LABEL_VALUE = "1"
+EXECUTION_LABEL = "atoms.execution_id"
+
+# 孤儿工作区保护窗口：最近 N 秒内创建的目录不清理，避免误删正在启动的执行
+ORPHAN_WORKSPACE_GRACE_SECONDS = 120.0
 
 # 镜像可用性缓存：避免每次执行都尝试拉取镜像（网络不通时会反复超时）
 _image_available: Optional[bool] = None
@@ -74,10 +84,6 @@ def _env_str(name: str, default: str) -> str:
     return os.environ.get(name, default)
 
 
-class DockerNotAvailableError(RuntimeError):
-    """Docker CLI 不可用或镜像拉取失败。"""
-
-
 class ExecutionService:
     """沙箱执行服务。每个实例绑定一个数据库会话。"""
 
@@ -117,6 +123,11 @@ class ExecutionService:
     def pids_limit(self) -> int:
         return _env_int("SANDBOX_PIDS_LIMIT", 64)
 
+    @property
+    def max_containers(self) -> int:
+        """同时存在的沙箱容器总量上限，<=0 表示不限制。"""
+        return _env_int("SANDBOX_MAX_CONTAINERS", 4)
+
     # ── Docker 可用性 ─────────────────────────────────────
     @staticmethod
     def is_docker_available() -> bool:
@@ -132,7 +143,7 @@ class ExecutionService:
             return False
 
     def ensure_image(self) -> None:
-        """确保沙箱镜像存在，不存在则拉取。失败抛 DockerNotAvailableError。
+        """确保沙箱镜像存在，不存在则拉取。失败抛 SandboxUnavailableError。
 
         结果缓存 60 秒，避免网络不通时反复拉取超时。
         """
@@ -140,7 +151,10 @@ class ExecutionService:
         now = time.time()
         if _image_available is not None and (now - _image_checked_at) < _IMAGE_CACHE_TTL:
             if not _image_available:
-                raise DockerNotAvailableError(f"沙箱镜像 {self.sandbox_image} 不可用（缓存）")
+                raise SandboxUnavailableError(
+                    error_codes.SANDBOX_IMAGE_PULL_FAILED,
+                    details={"image": self.sandbox_image, "reason": "cached_unavailable"},
+                )
             return
 
         check = subprocess.run(
@@ -164,7 +178,10 @@ class ExecutionService:
         if pull.returncode != 0:
             _image_available = False
             _image_checked_at = now
-            raise DockerNotAvailableError(f"拉取镜像 {self.sandbox_image} 失败：{pull.stderr.strip()}")
+            raise SandboxUnavailableError(
+                error_codes.SANDBOX_IMAGE_PULL_FAILED,
+                details={"image": self.sandbox_image, "reason": pull.stderr.strip()},
+            )
         _image_available = True
         _image_checked_at = now
 
@@ -175,6 +192,51 @@ class ExecutionService:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
             s.bind(("127.0.0.1", 0))
             return s.getsockname()[1]
+
+    # ── 总量上限 ──────────────────────────────────────────
+    @staticmethod
+    def _count_sandbox_containers() -> int:
+        """统计当前运行中的沙箱容器数（按 label 精确过滤）。"""
+        try:
+            ps = subprocess.run(
+                ["docker", "ps", "-q", "--filter", f"label={CONTAINER_LABEL}={CONTAINER_LABEL_VALUE}"],
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+        except (OSError, subprocess.SubprocessError) as exc:
+            logger.warning("统计沙箱容器失败：%s", exc)
+            return 0
+        if ps.returncode != 0:
+            return 0
+        return len([cid for cid in ps.stdout.split() if cid])
+
+    async def _enforce_container_cap(self) -> None:
+        """创建新容器前保证总量不超限：超限先回收最旧的执行，仍超限则拒绝。"""
+        limit = self.max_containers
+        if limit <= 0:
+            return
+
+        count = self._count_sandbox_containers()
+        if count < limit:
+            return
+
+        excess = count - limit + 1
+        result = await self.db.execute(
+            select(Execution)
+            .where(Execution.status == "running")
+            .order_by(Execution.started_at.asc(), Execution.id.asc())
+        )
+        for execution in list(result.scalars().all())[:excess]:
+            self._reap(execution, status="stopped")
+        await self.db.commit()
+
+        if self._count_sandbox_containers() >= limit:
+            raise SandboxUnavailableError(
+                error_codes.SANDBOX_START_FAILED,
+                details={"reason": "container_limit_reached", "limit": limit},
+                retryable=True,
+            )
 
     # ── 工作区 ────────────────────────────────────────────
     def _create_workspace(self, execution_id: str, html: str) -> Path:
@@ -204,25 +266,28 @@ class ExecutionService:
     async def run_html(self, html: str, version_id: int) -> Execution:
         """把 HTML 放进沙箱运行，返回 Execution 记录。
 
-        失败时抛 DockerNotAvailableError 或 RuntimeError；调用方负责处理并记录 failed 状态。
+        失败时抛 SandboxUnavailableError；调用方负责处理并记录 failed 状态。
         """
         if not self.is_docker_available():
-            raise DockerNotAvailableError("Docker 不可用")
+            raise SandboxUnavailableError(error_codes.SANDBOX_DOCKER_UNAVAILABLE)
 
         self.ensure_image()
+        await self._enforce_container_cap()
 
         last_error: Optional[Exception] = None
         for attempt in range(3):
             port = self._allocate_port()
-            execution_id = uuid.uuid4().hex[:12]
-            workspace = self._create_workspace(execution_id, html)
+            sandbox_id = uuid.uuid4().hex[:12]
+            workspace = self._create_workspace(sandbox_id, html)
             nginx_conf = self._ensure_nginx_conf()
-            container_name = f"{CONTAINER_PREFIX}{execution_id}"
+            container_name = f"{CONTAINER_PREFIX}{sandbox_id}"
 
             cmd = [
                 "docker", "run", "-d",
                 "--name", container_name,
                 "--rm",
+                "--label", f"{CONTAINER_LABEL}={CONTAINER_LABEL_VALUE}",
+                "--label", f"{EXECUTION_LABEL}={sandbox_id}",
                 "--read-only",
                 "--cap-drop=ALL",
                 "--security-opt=no-new-privileges",
@@ -242,6 +307,8 @@ class ExecutionService:
             try:
                 result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
             except subprocess.TimeoutExpired:
+                # CLI 被杀时容器可能已经创建，按名称强制回收，避免留下无记录孤儿
+                self._remove_container(container_name)
                 self._remove_workspace(workspace)
                 last_error = RuntimeError("docker run 超时")
                 continue
@@ -253,7 +320,9 @@ class ExecutionService:
                 if "port is already allocated" in stderr or "address already in use" in stderr:
                     last_error = RuntimeError(f"端口 {port} 被占用：{stderr}")
                     continue
-                raise RuntimeError(f"docker run 失败：{stderr}")
+                raise SandboxUnavailableError(
+                    error_codes.SANDBOX_RUN_FAILED, details={"reason": stderr}
+                )
 
             container_id = result.stdout.strip()
             preview_url = f"http://{self.sandbox_host}:{port}/"
@@ -262,21 +331,82 @@ class ExecutionService:
             execution = Execution(
                 version_id=version_id,
                 container_id=container_id,
+                sandbox_id=sandbox_id,
                 port=port,
                 status="running",
                 preview_url=preview_url,
                 started_at=datetime.now(timezone.utc),
                 expires_at=expires_at,
             )
-            self.db.add(execution)
-            await self.db.commit()
-            await self.db.refresh(execution)
+            try:
+                self.db.add(execution)
+                await self.db.commit()
+                await self.db.refresh(execution)
+            except Exception:
+                # 容器已启动但落库失败：立即回收，避免留下无 DB 记录的孤儿
+                logger.warning("沙箱执行落库失败，回收容器 %s", container_name, exc_info=True)
+                self._remove_container(container_name)
+                self._remove_workspace(workspace)
+                raise
             return execution
 
         # 三次重试都失败
         if last_error:
-            raise last_error
-        raise RuntimeError("启动沙箱失败")
+            raise SandboxUnavailableError(
+                error_codes.SANDBOX_START_FAILED,
+                details={"reason": str(last_error)},
+                retryable=True,
+            )
+        raise SandboxUnavailableError(error_codes.SANDBOX_START_FAILED)
+
+    # ── 回收单个执行 ──────────────────────────────────────
+    def _resolve_sandbox_id(self, execution: Execution) -> Optional[str]:
+        """解析沙箱 uuid。新记录直接取自 sandbox_id；旧记录在删容器前按 name 反查。"""
+        if execution.sandbox_id:
+            return execution.sandbox_id
+        if not execution.container_id:
+            return None
+        try:
+            inspect = subprocess.run(
+                ["docker", "inspect", "--format", "{{.Name}}", execution.container_id],
+                capture_output=True, text=True, timeout=10,
+            )
+        except (OSError, subprocess.SubprocessError):
+            return None
+        if inspect.returncode != 0:
+            return None
+        name = inspect.stdout.strip().lstrip("/")
+        if not name.startswith(CONTAINER_PREFIX):
+            return None
+        return name[len(CONTAINER_PREFIX):] or None
+
+    def _reap(self, execution: Execution, *, status: str) -> None:
+        """停容器 + 删工作区 + 置状态（不提交事务，由调用方统一 commit）。
+
+        必须先解析 sandbox_id 再删容器：容器带 --rm，一旦删除就无法从 name 反查。
+        """
+        sandbox_id = self._resolve_sandbox_id(execution)
+        reference = execution.container_id or (
+            f"{CONTAINER_PREFIX}{sandbox_id}" if sandbox_id else None
+        )
+        if reference:
+            self._remove_container(reference)
+        if sandbox_id:
+            if execution.sandbox_id is None:
+                execution.sandbox_id = sandbox_id
+            self._remove_workspace(self.sandbox_root / sandbox_id)
+        execution.status = status
+
+    @staticmethod
+    def _remove_container(reference: str) -> None:
+        """按容器名或 ID 强制删除容器（幂等：容器不存在时忽略失败）。"""
+        try:
+            subprocess.run(
+                ["docker", "rm", "-f", reference],
+                capture_output=True, text=True, timeout=30,
+            )
+        except (OSError, subprocess.SubprocessError) as exc:
+            logger.warning("删除沙箱容器 %s 失败：%s", reference, exc)
 
     # ── 停止单个执行 ──────────────────────────────────────
     async def stop(self, execution_id: int) -> Optional[Execution]:
@@ -285,31 +415,12 @@ class ExecutionService:
         if execution is None:
             return None
 
-        if execution.status == "running" and execution.container_id:
-            self._stop_container(execution.container_id)
+        if execution.status == "running":
+            self._reap(execution, status="stopped")
 
-        workspace = self.sandbox_root / f"{CONTAINER_PREFIX}{execution.id}"
-        # 容器名用的是 execution_id (uuid)，工作区目录名也是 uuid
-        # 但 Execution 表没有存 uuid，我们用 container_id 反推
-        if execution.container_id:
-            name_result = subprocess.run(
-                ["docker", "inspect", "--format", "{{.Name}}", execution.container_id],
-                capture_output=True, text=True, timeout=10,
-            )
-            if name_result.returncode == 0:
-                name = name_result.stdout.strip().lstrip("/")
-                if name.startswith(CONTAINER_PREFIX):
-                    wid = name[len(CONTAINER_PREFIX):]
-                    self._remove_workspace(self.sandbox_root / wid)
-
-        execution.status = "stopped"
         await self.db.commit()
         await self.db.refresh(execution)
         return execution
-
-    @staticmethod
-    def _stop_container(container_id: str) -> None:
-        subprocess.run(["docker", "stop", container_id], capture_output=True, text=True, timeout=30)
 
     # ── 回收过期执行 ──────────────────────────────────────
     async def cleanup_expired(self) -> int:
@@ -324,27 +435,57 @@ class ExecutionService:
         expired = result.scalars().all()
         count = 0
         for execution in expired:
-            if execution.container_id:
-                self._stop_container(execution.container_id)
-            execution.status = "expired"
+            self._reap(execution, status="expired")
             count += 1
         if count:
             await self.db.commit()
+        self._cleanup_orphan_workspaces(await self._running_sandbox_ids())
         return count
+
+    async def _running_sandbox_ids(self) -> set[str]:
+        result = await self.db.execute(
+            select(Execution).where(Execution.status == "running")
+        )
+        return {
+            execution.sandbox_id
+            for execution in result.scalars().all()
+            if execution.sandbox_id
+        }
+
+    def _cleanup_orphan_workspaces(self, known_ids: set[str]) -> int:
+        """清理无 running 记录的工作区目录；保护最近创建的目录，避免误删正在启动的。"""
+        root = self.sandbox_root
+        if not root.is_dir():
+            return 0
+        cutoff = time.time() - ORPHAN_WORKSPACE_GRACE_SECONDS
+        removed = 0
+        for entry in root.iterdir():
+            if not entry.is_dir() or entry.name in known_ids:
+                continue
+            try:
+                if entry.stat().st_mtime >= cutoff:
+                    continue
+            except OSError:
+                continue
+            shutil.rmtree(entry, ignore_errors=True)
+            removed += 1
+        if removed:
+            logger.info("清理了 %d 个孤儿沙箱工作区", removed)
+        return removed
 
     # ── 启动时清理残留容器 ────────────────────────────────
     @staticmethod
     def cleanup_orphan_containers() -> None:
-        """停止并删除所有 atoms-sandbox- 前缀的残留容器。"""
+        """删除所有带 atoms.sandbox=1 标签的残留容器（不依赖名称子串）。"""
         if not ExecutionService.is_docker_available():
             return
         ps = subprocess.run(
-            ["docker", "ps", "-aq", "--filter", f"name={CONTAINER_PREFIX}"],
+            ["docker", "ps", "-aq", "--filter", f"label={CONTAINER_LABEL}={CONTAINER_LABEL_VALUE}"],
             capture_output=True, text=True, timeout=30,
         )
         if ps.returncode != 0:
             return
         container_ids = [cid for cid in ps.stdout.split() if cid]
         for cid in container_ids:
-            subprocess.run(["docker", "rm", "-f", cid], capture_output=True, text=True, timeout=30)
+            ExecutionService._remove_container(cid)
         logger.info("清理了 %d 个残留沙箱容器", len(container_ids))
