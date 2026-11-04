@@ -260,16 +260,21 @@ class TestRunHtml:
 
 
 class TestContainerCap:
+    def test_default_limit_is_eight(self, service, monkeypatch):
+        """默认上限为 8（早期为 4，已按真实多项目预览调整）。"""
+        monkeypatch.delenv("SANDBOX_MAX_CONTAINERS", raising=False)
+        assert service.max_containers == 8
+
     @pytest.mark.asyncio
     async def test_rejects_when_limit_still_reached(self, service):
         """回收后仍达到上限（存在无 DB 记录的孤儿）：拒绝新建。"""
         service.db.execute = AsyncMock(return_value=_scalars_result([]))
-        with patch.object(ExecutionService, "_count_sandbox_containers", return_value=4):
+        with patch.object(ExecutionService, "_count_sandbox_containers", return_value=8):
             with pytest.raises(SandboxUnavailableError) as exc_info:
                 await service._enforce_container_cap()
 
         assert exc_info.value.code == error_codes.SANDBOX_START_FAILED
-        assert exc_info.value.details["reason"] == "container_limit_reached"
+        assert exc_info.value.details == {"reason": "container_limit_reached", "limit": 8}
 
     @pytest.mark.asyncio
     async def test_reaps_oldest_running(self, service):
@@ -281,13 +286,46 @@ class TestContainerCap:
                           status="running", preview_url="u2", started_at=now, expires_at=now)
         service.db.execute = AsyncMock(return_value=_scalars_result([oldest, newer]))
 
-        with patch.object(ExecutionService, "_count_sandbox_containers", side_effect=[4, 2]), \
+        with patch.object(ExecutionService, "_count_sandbox_containers", side_effect=[8, 7]), \
              patch("services.execution.subprocess.run", return_value=_make_result(0)):
             await service._enforce_container_cap()
 
         assert oldest.status == "stopped"
         assert newer.status == "running"
         service.db.commit.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_run_html_rejects_at_limit(self, service):
+        """达到上限且无可回收记录：run_html 抛 SANDBOX_START_FAILED。"""
+        service.db.execute = AsyncMock(return_value=_scalars_result([]))
+        with patch.object(ExecutionService, "is_docker_available", return_value=True), \
+             patch.object(ExecutionService, "ensure_image", return_value=None), \
+             patch.object(ExecutionService, "_count_sandbox_containers", return_value=8), \
+             patch("services.execution.subprocess.run", return_value=_make_result(0)):
+            with pytest.raises(SandboxUnavailableError) as exc_info:
+                await service.run_html("<html></html>", version_id=1, user_id="unit-test-user")
+
+        assert exc_info.value.code == error_codes.SANDBOX_START_FAILED
+        assert exc_info.value.details == {"reason": "container_limit_reached", "limit": 8}
+
+    @pytest.mark.asyncio
+    async def test_run_html_reaps_oldest_and_starts(self, service):
+        """达到上限时回收最旧执行后，本次 run_html 仍能正常启动。"""
+        now = datetime.now(timezone.utc)
+        oldest = Execution(id=1, version_id=1, container_id="c1", sandbox_id="s1", port=1,
+                           status="running", preview_url="u1", started_at=now, expires_at=now)
+        service.db.execute = AsyncMock(return_value=_scalars_result([oldest]))
+
+        with patch.object(ExecutionService, "is_docker_available", return_value=True), \
+             patch.object(ExecutionService, "ensure_image", return_value=None), \
+             patch.object(ExecutionService, "_allocate_port", return_value=52341), \
+             patch.object(ExecutionService, "_count_sandbox_containers", side_effect=[8, 7]), \
+             patch("services.execution.subprocess.run", return_value=_make_result(0, stdout="cid-new")):
+            execution = await service.run_html("<html></html>", version_id=2, user_id="unit-test-user")
+
+        assert oldest.status == "stopped"
+        assert execution.container_id == "cid-new"
+        assert execution.preview_url == "http://127.0.0.1:52341/"
 
     @pytest.mark.asyncio
     async def test_no_limit_when_disabled(self, service):

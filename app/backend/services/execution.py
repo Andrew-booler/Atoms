@@ -128,8 +128,13 @@ class ExecutionService:
 
     @property
     def max_containers(self) -> int:
-        """同时存在的沙箱容器总量上限，<=0 表示不限制。"""
-        return _env_int("SANDBOX_MAX_CONTAINERS", 4)
+        """同时存在的沙箱容器总量上限，<=0 表示不限制。
+
+        默认 8：早期为防泄漏取保守值 4，真实用户同时预览多个项目时容易撞上限并
+        误报 SANDBOX_START_FAILED；仍可通过 SANDBOX_MAX_CONTAINERS 调整。
+        按用户维度限额暂未实现（需额外按 user_id 统计容器），见问题复盘文档 TODO。
+        """
+        return _env_int("SANDBOX_MAX_CONTAINERS", 8)
 
     # ── Docker 可用性 ─────────────────────────────────────
     @staticmethod
@@ -509,3 +514,19 @@ class ExecutionService:
         for cid in container_ids:
             ExecutionService._remove_container(cid)
         logger.info("清理了 %d 个残留沙箱容器", len(container_ids))
+
+    @staticmethod
+    def cleanup_orphan_workspaces() -> None:
+        """删除沙箱根目录下的全部工作区目录（保留共享 nginx.conf）。
+
+        仅用于测试重置：容器与数据库记录都清空后，工作区不应继续占用临时目录。
+        """
+        root = Path(_env_str("SANDBOX_ROOT", str(Path(tempfile.gettempdir()) / "atoms_sandbox")))
+        if not root.is_dir():
+            return
+        removed = 0
+        for child in root.iterdir():
+            if child.is_dir():
+                shutil.rmtree(child, ignore_errors=True)
+                removed += 1
+        logger.info("清理了 %d 个残留沙箱工作区", removed)
