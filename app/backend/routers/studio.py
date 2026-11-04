@@ -560,10 +560,15 @@ async def plan(
     project_id: int,
     data: PlanRequest,
     build_id: Optional[str] = Query(default=None, max_length=64),
+    final: bool = Query(default=False),
     current_user: UserResponse = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> PlanResponse:
-    """阶段一：把需求拆成结构化计划，等用户确认后再执行。"""
+    """阶段一：把需求拆成结构化计划，等用户确认后再执行。
+
+    final=true 表示该构建会话只产出计划（前端确认后会另开会话），
+    阶段结束后立即追加 done 事件并关闭 SSE，避免流挂到超时上限。
+    """
     project = await _load_project(db, project_id, current_user.id)
     project_name = project.name
     ctx = await _build_ctx(
@@ -612,27 +617,33 @@ async def plan(
             Studio_messages.role == "user",
         ).order_by(Studio_messages.id.desc()))).scalars().first()
         if existing and _parse_meta(existing.meta).get("requirement_message_id") == (latest_user.id if latest_user else None) and _parse_meta(existing.meta).get("requirement") == data.requirement:
-            return PlanResponse(plan=PlanPayload(**_parse_meta(existing.meta)["plan"]), message=_message_out(existing), model=model)
-        message = await _append_message(
-            db,
-            project_id=project_id,
-            user_id=current_user.id,
-            role="assistant",
-            kind="plan",
-            content=text,
-            meta={
-                "plan": payload.model_dump(),
-                "model": model,
-                "requirement": data.requirement,
-                "approved": False,
-                "requirement_message_id": latest_user.id if latest_user else None,
-            },
-        )
-        if not (project.description or "").strip():
-            project.description = data.requirement
-        await _commit(db)
+            response = PlanResponse(plan=PlanPayload(**_parse_meta(existing.meta)["plan"]), message=_message_out(existing), model=model)
+        else:
+            message = await _append_message(
+                db,
+                project_id=project_id,
+                user_id=current_user.id,
+                role="assistant",
+                kind="plan",
+                content=text,
+                meta={
+                    "plan": payload.model_dump(),
+                    "model": model,
+                    "requirement": data.requirement,
+                    "approved": False,
+                    "requirement_message_id": latest_user.id if latest_user else None,
+                },
+            )
+            if not (project.description or "").strip():
+                project.description = data.requirement
+            await _commit(db)
 
-        return PlanResponse(plan=payload, message=_message_out(message), model=model)
+            response = PlanResponse(plan=payload, message=_message_out(message), model=model)
+
+        if final and ctx is not None:
+            await _emit_event(ctx, build_log.DONE, message="计划已生成，等待确认执行。")
+
+    return response
 
 
 @router.post("/projects/{project_id}/outline", response_model=OutlineResponse)
@@ -1015,6 +1026,14 @@ async def start_build(
         data={},
     )
     await _commit(db)
+    try:
+        await build_log.prune_events(
+            db, user_id=current_user.id, project_id=project_id
+        )
+        await _commit(db)
+    except Exception:  # noqa: BLE001 - 保留策略失败不影响构建
+        logger.warning("清理历史构建事件失败：project=%s", project_id, exc_info=True)
+        await db.rollback()
     return BuildStartResponse(build_id=build_id)
 
 

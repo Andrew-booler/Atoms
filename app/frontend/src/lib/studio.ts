@@ -215,7 +215,7 @@ export const studioApi = {
     buildId?: string
   ): Promise<PlanResponse> {
     const res = await client.apiCall.invoke({
-      url: withBuildId(`/api/v1/studio/projects/${projectId}/plan`, buildId),
+      url: `${withBuildId(`/api/v1/studio/projects/${projectId}/plan`, buildId)}${buildId ? '&final=true' : ''}`,
       method: 'POST',
       data: { requirement, profile },
       options: { timeout: 600_000 },

@@ -4,9 +4,10 @@
 一次构建以 (user_id, project_id, build_id) 定位，seq 在构建内递增。
 """
 import json
-from typing import Any, Dict, List, Optional
+import os
+from typing import Any, Dict, Iterable, List, Optional
 
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from models.build_events import BuildEvent
@@ -18,11 +19,34 @@ LOG = "log"
 ERROR = "error"
 DONE = "done"
 
+#: 每个项目默认保留最近多少次构建的事件；可用环境变量调整。
+DEFAULT_KEEP_BUILDS = 20
+
 #: 固定事件类型清单（顺序即前端展示约定，不随实现变化）。
 EVENT_TYPES = (STAGE_STARTED, STAGE_FINISHED, FILE_CREATED, LOG, ERROR, DONE)
 
 #: 终止事件：SSE 在该事件之后主动关闭连接。
 TERMINAL_TYPES = (ERROR, DONE)
+
+
+def configured_keep_builds() -> int:
+    """读取保留次数；非法或缺失时回退默认值，且至少保留 1 次构建。"""
+    raw = os.environ.get("APP_BUILD_EVENT_KEEP_BUILDS", "")
+    try:
+        return max(1, int(raw))
+    except (TypeError, ValueError):
+        return DEFAULT_KEEP_BUILDS
+
+
+def builds_to_delete(build_ids: Iterable[str], keep_builds: int) -> List[str]:
+    """给定按新到旧排序的构建 id，返回应删除的旧构建 id。"""
+    ordered: List[str] = []
+    seen = set()
+    for build_id in build_ids:
+        if build_id and build_id not in seen:
+            seen.add(build_id)
+            ordered.append(build_id)
+    return ordered[max(1, keep_builds):]
 
 
 def _loads(raw: Optional[str]) -> Dict[str, Any]:
@@ -142,3 +166,40 @@ async def latest_build_id(
         )
     ).scalar_one_or_none()
     return row
+
+
+async def prune_events(
+    db: AsyncSession,
+    *,
+    user_id: str,
+    project_id: int,
+    keep_builds: Optional[int] = None,
+) -> int:
+    """只保留最近 N 次构建的事件（按项目），返回删除的事件行数。
+
+    不提交事务，由调用方决定提交时机。
+    """
+    keep = keep_builds if keep_builds is not None else configured_keep_builds()
+    build_ids = (
+        await db.execute(
+            select(BuildEvent.build_id)
+            .where(
+                BuildEvent.user_id == user_id,
+                BuildEvent.project_id == project_id,
+            )
+            .group_by(BuildEvent.build_id)
+            .order_by(func.max(BuildEvent.id).desc())
+        )
+    ).scalars().all()
+    stale = builds_to_delete(build_ids, keep)
+    if not stale:
+        return 0
+    result = await db.execute(
+        delete(BuildEvent).where(
+            BuildEvent.user_id == user_id,
+            BuildEvent.project_id == project_id,
+            BuildEvent.build_id.in_(stale),
+        )
+    )
+    await db.flush()
+    return int(result.rowcount or 0)

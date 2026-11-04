@@ -504,6 +504,8 @@ Phase 17 ── 登录/会话 + 多用户数据隔离 + 越权访问控制
 - 支持刷新、清屏、复制。
 - 依赖：Phase 1（沙箱执行层，终端展示沙箱内的 stdout/stderr）。
 
+**收尾补强（2026-11-04）**：plan-only 构建通过 `final=true` 在计划阶段结束后追加 `done` 并关闭流；`build_events` 增加按项目保留最近 N 次构建的清理规则（`APP_BUILD_EVENT_KEEP_BUILDS`，默认 20）；Playwright 35 条界面集成用例加入统一鉴权前置并适配当前 mock 产物文案。
+
 ### Phase 11：知识库与工作区上下文
 参考 AtomsAI 的 Workspace 概念：
 - 工作区 = 持久 system prompt + 知识库 +（可选）工具 + 自定义 UI。

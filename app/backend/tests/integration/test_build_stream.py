@@ -4,12 +4,15 @@ AI 边界仍由受控提供者返回固定结果（零真实调用）；沙箱�
 preview_ready=False，但事件序列与 done 仍必须完整。
 """
 import json
+from datetime import datetime, timedelta
 
 import httpx
 from sqlalchemy import func, select
 
 from core.auth import create_access_token
+from models.build_events import BuildEvent
 from routers.studio import _plan_request_text
+from services import build_events as build_log
 from services import studio_output
 from testing import studio_app as host
 
@@ -66,6 +69,21 @@ async def _run_full_build(client, project_id: int, build_id: str, body: dict) ->
         },
     )
     assert artifact.status_code == 200
+
+
+# 集成-B1a：只跑 plan 的构建必须收到 done 并主动结束流
+async def test_plan_only_build_stream_terminates(client):
+    project_id, build_id, body = await _build_fixture(client)
+    plan = await client.post(
+        f"{API}/projects/{project_id}/plan?build_id={build_id}&final=true",
+        json={"requirement": body["require"]},
+    )
+    assert plan.status_code == 200
+
+    stream = await client.get(f"{API}/projects/{project_id}/builds/{build_id}/stream")
+    events = _sse_events(stream.text)
+    assert events[-1][0] == "done"
+    assert "等待确认执行" in events[-1][1]["message"]
 
 
 # 集成-B1：三阶段事件按固定顺序落库，且交付事件含文件大小与预览摘要
@@ -264,3 +282,44 @@ async def test_unauthenticated_client_gets_401_on_history():
             resp = await ac.get(f"{API}/projects/1/builds/latest")
     assert resp.status_code == 401
     assert resp.json()["code"] == "AUTH_REQUIRED"
+
+
+async def test_prune_events_keeps_only_latest_builds(client):
+    project = (
+        await client.post(f"{API}/projects", json={"name": "保留策略", "description": ""})
+    ).json()
+    now = datetime.now().astimezone()
+    async with host.sessions() as session:
+        for index, build_id in enumerate(["build-a", "build-b", "build-c"]):
+            session.add(
+                BuildEvent(
+                    user_id=host.TEST_USER_ID,
+                    project_id=project["id"],
+                    build_id=build_id,
+                    seq=1,
+                    type=build_log.STAGE_STARTED,
+                    message="开始",
+                    data=json.dumps({}),
+                    created_at=now + timedelta(minutes=index),
+                )
+            )
+        await session.commit()
+
+    async with host.sessions() as session:
+        deleted = await build_log.prune_events(
+            session,
+            user_id=host.TEST_USER_ID,
+            project_id=project["id"],
+            keep_builds=2,
+        )
+        await session.commit()
+        remaining = (
+            await session.execute(
+                select(BuildEvent.build_id)
+                .where(BuildEvent.project_id == project["id"])
+                .group_by(BuildEvent.build_id)
+            )
+        ).scalars().all()
+
+    assert deleted == 1
+    assert sorted(remaining) == ["build-b", "build-c"]
