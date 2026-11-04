@@ -24,6 +24,7 @@ from services.aihub import (
     _env_bool,
     _env_int,
     providers_for,
+    stage_timeout,
 )
 
 #: 各阶段结构化输出失败时使用的错误码：(通用失败, 内容无效)。
@@ -186,6 +187,7 @@ async def _gentxt(
     system: str,
     user: str,
     *,
+    stage: str,
     profile: Optional[str] = None,
     max_completion_tokens: int,
     temperature: float = 0.6,
@@ -202,9 +204,12 @@ async def _gentxt(
         max_completion_tokens=max_completion_tokens,
         temperature=temperature,
     )
+    # 阶段级超时：artifact 默认 120s（上游实测 46–80s），plan/outline 维持 60s，
+    # 避免所有阶段都长时间占用供应商并发槽位；可用 APP_AI_STAGE_<STAGE>_TIMEOUT 覆盖。
+    request_timeout = stage_timeout(stage)
     # 免费模型偶发返回空响应，视为瞬时失败并按指数退避重试。
     for attempt in range(AI_MAX_RETRIES + 1):
-        response = await service.gentxt(request)
+        response = await service.gentxt(request, timeout=request_timeout)
         # 阶段级 token 用量：模拟提供者没有 usage 时不会累加，最终为 None。
         ai_usage.record_usage(getattr(response, "usage", None))
         content = (response.content or "").strip()
@@ -231,7 +236,12 @@ async def _gentxt_json(
 ) -> Dict[str, Any]:
     failure_code, invalid_code = _STAGE_ERROR_CODES[stage]
     raw = await _gentxt(
-        system, user, profile=profile, max_completion_tokens=max_completion_tokens, temperature=temperature
+        system,
+        user,
+        stage=stage,
+        profile=profile,
+        max_completion_tokens=max_completion_tokens,
+        temperature=temperature,
     )
     payload_text = _extract_json_block(raw)
     if not payload_text.strip():
@@ -249,6 +259,7 @@ async def _gentxt_json(
         repaired = await _gentxt(
             "你只输出合法 JSON，字段齐全，不要解释。修复下面这段内容，返回合法 JSON。",
             payload_text,
+            stage=stage,
             profile=profile,
             max_completion_tokens=max_completion_tokens,
             temperature=0,
@@ -402,7 +413,7 @@ async def generate_artifact(
 界面语言与需求语言保持一致。现在直接输出 HTML。"""
 
     raw = await _gentxt(
-        ARTIFACT_SYSTEM, user, profile=profile,
+        ARTIFACT_SYSTEM, user, stage="artifact", profile=profile,
         max_completion_tokens=_stage_request_tokens("artifact"), temperature=0.7,
     )
     try:
@@ -412,6 +423,7 @@ async def generate_artifact(
             ARTIFACT_SYSTEM,
             "上一次输出不是完整 HTML。请重新输出完整文档，从 <!DOCTYPE html> 开始、到 </html> 结束，只输出 HTML。\n\n需求："
             + requirement,
+            stage="artifact",
             profile=profile,
             max_completion_tokens=_stage_request_tokens("artifact"),
             temperature=0.4,

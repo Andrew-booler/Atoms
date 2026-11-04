@@ -141,3 +141,64 @@ def test_redact_covers_ark_keys_and_authorization():
     assert "ark-abcdefghijklmnopqrstuvwxyz" not in cleaned
     assert "abcdefgh12345678" not in cleaned
     assert "user:pass@" not in cleaned
+
+
+def test_production_logging_levels_suppress_httpx_debug(monkeypatch):
+    """生产（非 debug）：全局 INFO、HTTP/SDK 库 WARNING，访问日志照常输出。
+
+    线上曾因全局 DEBUG 把 httpx 每次请求/响应帧全部写入日志，既噪声大又
+    放大了日志脱敏处理量；这里断言生产配置下这些 DEBUG 帧被彻底丢弃。
+    """
+    import main as app_main
+    from core.config import settings
+
+    tracked = (
+        "uvicorn",
+        "fastapi",
+        "uvicorn.access",
+        "httpx",
+        "httpcore",
+        "openai",
+        "openai._base_client",
+    )
+    root = logging.getLogger()
+    previous_root_level = root.level
+    previous_levels = {name: logging.getLogger(name).level for name in tracked}
+
+    monkeypatch.setattr(settings, "debug", False)
+    try:
+        app_main.setup_logging()
+
+        assert root.level == logging.INFO
+        assert logging.getLevelName(root.level) == "INFO"
+        for name in ("httpx", "httpcore", "openai", "openai._base_client"):
+            assert logging.getLogger(name).level == logging.WARNING
+        # 访问日志不受降噪影响，仍为 INFO。
+        assert logging.getLogger("uvicorn.access").isEnabledFor(logging.INFO)
+
+        # 访问日志仍能正常成行（5 元组经过滤器后仍可被 AccessFormatter 解包）。
+        stream = io.StringIO()
+        logger, previous = _attached_access_logger(stream)
+        try:
+            logger.info(_ACCESS_TEMPLATE, *_ACCESS_ARGS)
+        finally:
+            _restore(logger, previous)
+        assert "200" in stream.getvalue()
+
+        # httpx DEBUG 帧被抑制；同 logger 的 WARNING 仍可输出。
+        captured = io.StringIO()
+        handler = logging.StreamHandler(captured)
+        handler.setLevel(logging.DEBUG)
+        root.addHandler(handler)
+        try:
+            logging.getLogger("httpx").debug("httpx-debug-frame-should-be-dropped")
+            logging.getLogger("httpx").warning("httpx-warning-should-pass")
+        finally:
+            root.removeHandler(handler)
+
+        assert "httpx-debug-frame-should-be-dropped" not in captured.getvalue()
+        assert "httpx-warning-should-pass" in captured.getvalue()
+    finally:
+        root.setLevel(previous_root_level)
+        for name, level in previous_levels.items():
+            logging.getLogger(name).setLevel(level)

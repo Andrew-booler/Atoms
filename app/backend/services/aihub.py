@@ -88,8 +88,10 @@ DEFAULT_VOICE = {"male": "Ethan", "female": "Cherry"}
 # ==== AI 调用韧性配置（可用环境变量覆盖，避免硬编码） ====
 # 默认并发上限：每家供应商未单独指定时采用该值。
 AI_MAX_CONCURRENCY = int(os.environ.get("APP_AI_MAX_CONCURRENCY", "2"))
-# 可重试错误（429/5xx/超时/连接错误）的最大重试次数（按供应商独立计数）。
-AI_MAX_RETRIES = int(os.environ.get("APP_AI_MAX_RETRIES", "4"))
+# 可重试错误（5xx/超时/连接错误）的最大重试次数（按供应商独立计数）。
+# 429 不在此列：直接降级到下一家，避免限流时整条链空转。
+# 默认 1 次：最坏耗时 = 2 次请求，超时放大到 120s 后仍在可控范围。
+AI_MAX_RETRIES = int(os.environ.get("APP_AI_MAX_RETRIES", "1"))
 # 指数退避的基座秒数与封顶秒数。
 AI_RETRY_BASE_SECONDS = float(os.environ.get("APP_AI_RETRY_BASE", "1.0"))
 AI_RETRY_MAX_SECONDS = float(os.environ.get("APP_AI_RETRY_MAX", "30.0"))
@@ -108,6 +110,26 @@ THINKING_EXTRA_BODY: Dict[str, Dict[str, Any]] = {
 STUDIO_THINKING_BUDGET = 2048
 # 方舟开启思考时使用的 reasoning_effort。
 ARK_REASONING_EFFORT = os.environ.get("APP_AI_ARK_REASONING_EFFORT", "high").strip() or "high"
+
+# ==== 分阶段请求超时 ====
+# artifact 要产出完整单文件 HTML，实测上游耗时 46–80s，默认放宽到 120s；
+# plan/outline 输出短，维持 60s，避免无谓地长时间占用供应商并发槽位。
+# 阶段级可用 APP_AI_STAGE_<STAGE>_TIMEOUT 覆盖（如 APP_AI_STAGE_ARTIFACT_TIMEOUT）；
+# 供应商级 APP_AI_<PROVIDER>_TIMEOUT 仍是 SDK 客户端默认值，调用方未传阶段值时生效。
+STAGE_TIMEOUT_DEFAULTS: Dict[str, float] = {"plan": 60.0, "outline": 60.0, "artifact": 120.0}
+PROVIDER_TIMEOUT_DEFAULT = 120.0
+
+
+def stage_timeout(stage: str) -> float:
+    """按阶段解析请求超时（秒）。
+
+    优先级：``APP_AI_STAGE_<STAGE>_TIMEOUT`` > 阶段默认值。
+    非法或非正数一律回落默认，避免环境变量写错导致请求立刻超时。
+    """
+    raw = _env_float(f"APP_AI_STAGE_{stage.upper()}_TIMEOUT", None)
+    if raw is not None and raw > 0:
+        return raw
+    return STAGE_TIMEOUT_DEFAULTS.get(stage, PROVIDER_TIMEOUT_DEFAULT)
 
 
 def _backoff_seconds(attempt: int) -> float:
@@ -167,7 +189,7 @@ class ProviderConfig:
     model: str
     max_completion_tokens: Optional[int] = None
     max_concurrency: int = AI_MAX_CONCURRENCY
-    timeout: float = 60.0
+    timeout: float = PROVIDER_TIMEOUT_DEFAULT
     thinking_enabled: bool = False
     thinking_budget: Optional[int] = None
 
@@ -261,7 +283,7 @@ def _build_providers() -> List[ProviderConfig]:
                 model=model,
                 max_completion_tokens=_env_int(f"{prefix}_MAX_COMPLETION_TOKENS", None),
                 max_concurrency=_env_int(f"{prefix}_MAX_CONCURRENCY", AI_MAX_CONCURRENCY) or AI_MAX_CONCURRENCY,
-                timeout=_env_float(f"{prefix}_TIMEOUT", 60.0) or 60.0,
+                timeout=_env_float(f"{prefix}_TIMEOUT", PROVIDER_TIMEOUT_DEFAULT) or PROVIDER_TIMEOUT_DEFAULT,
                 thinking_enabled=thinking_enabled,
                 thinking_budget=_env_int("APP_STUDIO_THINKING_BUDGET", STUDIO_THINKING_BUDGET),
             )
@@ -314,9 +336,14 @@ def _get_semaphore(provider: ProviderConfig) -> asyncio.Semaphore:
 
 
 def _retryable_exceptions() -> tuple:
-    from openai import APIConnectionError, APITimeoutError, InternalServerError, RateLimitError
+    """可重试的瞬时错误：仅 5xx/超时/连接错误。
 
-    return (RateLimitError, InternalServerError, APITimeoutError, APIConnectionError)
+    429（RateLimitError）不在此列：供应商限流时继续退避重试只会空转，
+    直接抛给上层降级到下一家更快。
+    """
+    from openai import APIConnectionError, APITimeoutError, InternalServerError
+
+    return (InternalServerError, APITimeoutError, APIConnectionError)
 
 
 def _provider_errors() -> tuple:
@@ -365,7 +392,14 @@ class AIHubService:
     def _make_client(provider: ProviderConfig) -> "AsyncOpenAI":
         from openai import AsyncOpenAI
 
-        return AsyncOpenAI(api_key=provider.api_key, base_url=provider.base_url, timeout=provider.timeout)
+        # max_retries=0：关闭 SDK 内层自动重试，重试统一由应用层计数，
+        # 否则 429/5xx 会被 SDK 再放大一轮（历史上 60s 超时 × 2 次 = 120s 空转）。
+        return AsyncOpenAI(
+            api_key=provider.api_key,
+            base_url=provider.base_url,
+            timeout=provider.timeout,
+            max_retries=0,
+        )
 
     def _client_for(self, provider: ProviderConfig) -> "AsyncOpenAI":
         client = self._clients.get(provider.name)
@@ -391,8 +425,18 @@ class AIHubService:
             content = [item.model_dump() if hasattr(item, "model_dump") else item for item in content]
         return {"role": msg.role, "content": content}
 
-    async def _call_provider(self, provider: ProviderConfig, request: GenTxtRequest, *, stream: bool):
-        """向单家供应商发起请求，按该供应商独立计数做指数退避重试。"""
+    async def _call_provider(
+        self,
+        provider: ProviderConfig,
+        request: GenTxtRequest,
+        *,
+        stream: bool,
+        timeout: Optional[float] = None,
+    ):
+        """向单家供应商发起请求，按该供应商独立计数做指数退避重试。
+
+        ``timeout`` 为阶段级单次请求超时（秒）；未传时沿用供应商客户端默认值。
+        """
         retryable = _retryable_exceptions()
         client = self._client_for(provider)
         messages = [self._convert_message(msg) for msg in request.messages]
@@ -411,6 +455,8 @@ class AIHubService:
             "max_completion_tokens": max_completion_tokens,
             "stream": stream,
         }
+        if timeout is not None:
+            create_kwargs["timeout"] = timeout
         if extra_body:
             create_kwargs["extra_body"] = extra_body
 
@@ -432,15 +478,22 @@ class AIHubService:
                 await asyncio.sleep(delay)
                 attempt += 1
 
-    async def gentxt(self, request: GenTxtRequest) -> GenTxtResponse:
+    async def gentxt(
+        self,
+        request: GenTxtRequest,
+        *,
+        timeout: Optional[float] = None,
+    ) -> GenTxtResponse:
         """
         Generate Text API (non-streaming), supports text and image input.
 
         按主备顺序调用供应商：429/5xx/超时/连接错误/空响应逐级降级；
+        429 直接降级不重试，5xx/超时/连接错误按供应商独立重试有限次数。
         全部失败时抛出 AllProvidersFailedError（携带逐家供应商与失败原因）。
 
         Args:
             request: Generate text request parameters.
+            timeout: 单次请求超时（秒），用于按阶段放宽；未传沿用客户端默认值。
 
         Returns:
             GenTxtResponse: generated text response.
@@ -448,7 +501,7 @@ class AIHubService:
         failures: List[ProviderFailure] = []
         for provider in self.providers:
             try:
-                response = await self._call_provider(provider, request, stream=False)
+                response = await self._call_provider(provider, request, stream=False, timeout=timeout)
             except _provider_errors() as exc:
                 failures.append(ProviderFailure(provider.name, provider.model, f"{type(exc).__name__}: {exc}"))
                 logger.warning("AI 供应商 %s 调用失败，降级到下一家：%s", provider.name, type(exc).__name__)
@@ -477,15 +530,22 @@ class AIHubService:
         logger.error("AI 全部供应商失败: %s", "; ".join(f"{f.provider}: {f.reason}" for f in failures))
         raise AllProvidersFailedError(failures)
 
-    async def gentxt_stream(self, request: GenTxtRequest) -> AsyncGenerator[str, None]:
+    async def gentxt_stream(
+        self,
+        request: GenTxtRequest,
+        *,
+        timeout: Optional[float] = None,
+    ) -> AsyncGenerator[str, None]:
         """
         Generate Text API (streaming), supports text and image input.
 
         建流阶段失败（429/5xx/超时/连接）或整条流无内容时降级到下一家；
-        一旦已产出内容后中途失败，则不再降级、直接抛出（避免内容重复/错乱）。
+        429 直接降级不重试；一旦已产出内容后中途失败，则不再降级、直接抛出
+        （避免内容重复/错乱）。
 
         Args:
             request: Generate text request parameters.
+            timeout: 单次请求超时（秒）。
 
         Yields:
             str: Generated text content chunk (plain text, not JSON).
@@ -495,7 +555,7 @@ class AIHubService:
 
         for provider in self.providers:
             try:
-                stream = await self._call_provider(provider, request, stream=True)
+                stream = await self._call_provider(provider, request, stream=True, timeout=timeout)
             except provider_errors as exc:
                 failures.append(ProviderFailure(provider.name, provider.model, f"{type(exc).__name__}: {exc}"))
                 logger.warning("AI 供应商 %s 建流失败，降级到下一家：%s", provider.name, type(exc).__name__)

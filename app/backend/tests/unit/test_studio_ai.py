@@ -30,15 +30,17 @@ class _RecordingService:
     def __init__(self, content: str):
         self.content = content
         self.requests = []
+        self.timeouts = []
 
-    async def gentxt(self, request):
+    async def gentxt(self, request, *, timeout=None):
         self.requests.append(request)
+        self.timeouts.append(timeout)
         return GenTxtResponse(content=self.content, model=request.model)
 
 
 def _patch(monkeypatch, content: str) -> _RecordingService:
     service = _RecordingService(content)
-    monkeypatch.setattr(studio_ai, "AIHubService", lambda: service)
+    monkeypatch.setattr(studio_ai, "AIHubService", lambda **kwargs: service)
     return service
 
 
@@ -104,3 +106,33 @@ async def test_stage_max_tokens_env_invalid_falls_back(monkeypatch):
     artifact_service = _patch(monkeypatch, HTML)
     await studio_ai.generate_artifact("做一个待办清单", {"summary": "计划"}, {"title": "原型"})
     assert artifact_service.requests[0].max_completion_tokens == 6144 + 1024
+
+
+async def test_stage_timeout_defaults(monkeypatch):
+    """artifact 使用放宽后的 120s；plan/outline 保持 60s。"""
+    monkeypatch.delenv("APP_AI_STAGE_PLAN_TIMEOUT", raising=False)
+    monkeypatch.delenv("APP_AI_STAGE_OUTLINE_TIMEOUT", raising=False)
+    monkeypatch.delenv("APP_AI_STAGE_ARTIFACT_TIMEOUT", raising=False)
+    monkeypatch.delenv("APP_AI_ENABLE_THINKING", raising=False)
+
+    plan_service = _patch(monkeypatch, PLAN_JSON)
+    await studio_ai.generate_plan("做一个待办清单", project_name="待办")
+    assert plan_service.timeouts[0] == 60.0
+
+    outline_service = _patch(monkeypatch, OUTLINE_JSON)
+    await studio_ai.generate_outline("做一个待办清单", {"summary": "计划", "steps": []})
+    assert outline_service.timeouts[0] == 60.0
+
+    artifact_service = _patch(monkeypatch, HTML)
+    await studio_ai.generate_artifact("做一个待办清单", {"summary": "计划"}, {"title": "原型"})
+    assert artifact_service.timeouts[0] == 120.0
+
+
+async def test_stage_timeout_env_override_for_artifact(monkeypatch):
+    """artifact 超时可由 APP_AI_STAGE_ARTIFACT_TIMEOUT 覆盖。"""
+    monkeypatch.setenv("APP_AI_STAGE_ARTIFACT_TIMEOUT", "180")
+    monkeypatch.delenv("APP_AI_ENABLE_THINKING", raising=False)
+
+    artifact_service = _patch(monkeypatch, HTML)
+    await studio_ai.generate_artifact("做一个待办清单", {"summary": "计划"}, {"title": "原型"})
+    assert artifact_service.timeouts[0] == 180.0

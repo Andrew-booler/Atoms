@@ -30,6 +30,9 @@ def setup_logging():
     if os.environ.get("IS_LAMBDA") == "true":
         return
 
+    is_debug = bool(settings.debug)
+    level = logging.DEBUG if is_debug else logging.INFO
+
     # Create the logs directory
     log_dir = "logs"
     os.makedirs(log_dir, exist_ok=True)
@@ -43,7 +46,7 @@ def setup_logging():
 
     # Configure the root logger
     logging.basicConfig(
-        level=logging.DEBUG,
+        level=level,
         format=log_format,
         handlers=[
             # File handler
@@ -52,19 +55,30 @@ def setup_logging():
             logging.StreamHandler(),
         ],
     )
+    # basicConfig 在已有 handler 时不改 level（测试/嵌入场景），显式设置保证一致。
+    logging.getLogger().setLevel(level)
     cleanup_old_log_files(log_dir, current_log_file=log_file)
     install_sensitive_data_filter()
 
     # Set log levels for specific modules
-    logging.getLogger("uvicorn").setLevel(logging.DEBUG)
-    logging.getLogger("fastapi").setLevel(logging.DEBUG)
+    if is_debug:
+        # 本地开发保留全量 DEBUG（含 SDK 请求帧），便于排查。
+        logging.getLogger("uvicorn").setLevel(logging.DEBUG)
+        logging.getLogger("fastapi").setLevel(logging.DEBUG)
+    else:
+        # 生产：全局 INFO；第三方 HTTP/SDK 的请求响应帧是 DEBUG，统一压到 WARNING。
+        # 保留 uvicorn.access 的 INFO，访问日志照常输出。
+        logging.getLogger("uvicorn").setLevel(logging.INFO)
+        logging.getLogger("fastapi").setLevel(logging.INFO)
+        for noisy in ("httpx", "httpcore", "openai", "openai._base_client"):
+            logging.getLogger(noisy).setLevel(logging.WARNING)
     logging.getLogger("watchfiles").setLevel(logging.WARNING)
 
     # Log configuration details
     logger = logging.getLogger(__name__)
     logger.info("=== Logging system initialized ===")
     logger.info(f"Log file: {log_file}")
-    logger.info("Log level: DEBUG")
+    logger.info("Log level: %s", logging.getLevelName(level))
     logger.info(f"Log date: {log_date}")
 
 

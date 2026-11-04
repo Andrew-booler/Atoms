@@ -419,7 +419,12 @@ Phase 17 ── 登录/会话 + 多用户数据隔离 + 越权访问控制
   3. 火山方舟：`deepseek-v4-1-flash-economy-261017` → 200、2.08s、正文非空、`finish_reason=stop`；该模型默认开启 thinking，`max_tokens` 过小（如 32）会被 reasoning 全部占用，导致 `content` 为空。
   4. 降级语义：401/403 立即降级且不重试；全部供应商失败时抛 `AllProvidersFailedError`。
 - **thinking 与预算（2026-11-04 更新，按官方文档核实）**：调用层新增 `APP_AI_ENABLE_THINKING`（默认 `false`）。**关闭时**百炼传 `extra_body={"enable_thinking": false}`、方舟传 `extra_body={"reasoning_effort": "none"}`（不再传 `thinking.type`），其它供应商不传；**开启时**百炼传 `enable_thinking=true` + `thinking_budget`（默认 2048，可用 `APP_STUDIO_THINKING_BUDGET` 覆盖）、方舟传 `reasoning_effort=high`。请求体统一改用 `max_completion_tokens`（百炼/方舟语义均为“思考+回答”总量），移除 `max_tokens`；百炼不再同传 `max_tokens`/`reasoning_effort`，方舟不再同传 `max_tokens`/`thinking`，避免互斥 400。Studio 三阶段可见正文预算仍由 `APP_STUDIO_PLAN_MAX_TOKENS`（1600）、`APP_STUDIO_OUTLINE_MAX_TOKENS`（2200）、`APP_STUDIO_ARTIFACT_MAX_TOKENS`（6144）控制，请求总量自动换算：开启思考 = 正文 + thinking_budget + 1024；关闭思考 = 正文 + 1024（artifact 默认分别为 9216 / 7168）。`app/.env.example` 已同步说明。
-- 替换 `MockOutputProvider` 已完成，Plan/Outline/HTML 响应形状不变，上层流程无感知。
+- **调用韧性、超时与日志约定（2026-11-04 修复，长期有效）**：
+  1. **429 不重试、直接降级**：`AsyncOpenAI(max_retries=0)` 关闭 SDK 内层重试；应用层 `_retryable_exceptions()` 只保留 5xx/超时/连接错误（默认 `APP_AI_MAX_RETRIES=1`）。限流时不再退避空转，数秒内切下一家（历史约 96s → 数秒）。
+  2. **超时按阶段可配**：`APP_AI_STAGE_<STAGE>_TIMEOUT`（plan/outline/artifact），artifact 默认 **120s**（上游实测 46–80s），plan/outline 维持 60s；供应商级 `APP_AI_<PROVIDER>_TIMEOUT` 仍作为客户端默认值（默认 120s）。仅放宽必需的 artifact，并关闭 SDK 内层重试，避免长连接长期占满并发槽位。
+  3. **生产日志级别**：非 debug 全局 INFO；`httpx`/`httpcore`/`openai`/`openai._base_client` 固定 WARNING；`uvicorn.access` 保留 INFO；本地 `DEBUG=true` 仍为 DEBUG。
+  4. **流断线提示**：前端 SSE `fetch`/`read()` 抛错、流提前关闭、未收到 `done` 时统一显示「连接中断，服务可能已重启，请重试。」并标记构建失败；HTTP 4xx/5xx 优先展示后端 `message`，不把 `Network Error` 原样抛给用户。
+- **限制说明**：Fly 试用机每 5 分钟强制停机仍会切断进行中的请求，上述修复只是让失败更快、提示更清晰，无法避免连接被切断。
 - **决策点（Phase 4 启动时定，已收敛）**：
   - 模型选型：需确认是否支持 **function-calling / tool use**（直接影响 Phase 5 多 Agent 交接和 Phase 6 工具调用）。
   - 是否同时提供 **embedding API**（影响 Phase 11 知识库，若无则需单独接入 embedding 模型）。
