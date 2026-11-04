@@ -10,6 +10,10 @@ class ModelOption(BaseModel):
     model: str
     label: str
     hint: str
+    # 档位绑定信息（真实 AI 模式下填写；模拟输出模式下为空）。
+    provider: str = ""
+    provider_label: str = ""
+    model_label: str = ""
 
 
 class ModelsResponse(BaseModel):

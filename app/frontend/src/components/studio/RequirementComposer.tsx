@@ -99,7 +99,8 @@ export function RequirementComposer({
             >
               {models.map((model) => (
                 <option key={model.key} value={model.key}>
-                  {model.label} · {model.model}
+                  {model.label} · {model.model_label || model.model}
+                  {model.provider_label ? `（${model.provider_label}）` : ''}
                 </option>
               ))}
             </select>

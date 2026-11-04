@@ -12,7 +12,7 @@ import json
 import logging
 import os
 import random
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, AsyncGenerator, Callable, Dict, List, Optional, Tuple
 
@@ -271,6 +271,22 @@ def _build_providers() -> List[ProviderConfig]:
     if user_provider is not None:
         providers.insert(0, user_provider)
     return providers
+
+
+def providers_for(primary: Optional[str] = None, model: Optional[str] = None) -> List[ProviderConfig]:
+    """按档位绑定返回供应商链：绑定的主供应商排最前，其余按全局优先级跟随。
+
+    模型名只跟随供应商：主供应商使用档位指定的 model，降级家一律使用自己的
+    ``ProviderConfig.model``（绝不把 A 家模型名发给 B 家）。主供应商未配置时
+    整条链退化为全局顺序，避免档位不可用直接失败。
+    """
+
+    providers = _build_providers()
+    if not primary:
+        return providers
+    head = [replace(p, model=model) if model else p for p in providers if p.name == primary]
+    tail = [p for p in providers if p.name != primary]
+    return head + tail
 
 
 def has_configured_provider() -> bool:

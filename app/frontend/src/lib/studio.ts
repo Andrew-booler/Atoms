@@ -21,6 +21,11 @@ export interface ModelOption {
   model: string;
   label: string;
   hint: string;
+  /** 档位绑定的供应商（真实 AI 模式下发；模拟输出为空）。 */
+  provider?: string;
+  provider_label?: string;
+  /** 面向上展示的模型名，如 GLM-4.7-Flash。 */
+  model_label?: string;
 }
 
 export interface ModelsResponse {

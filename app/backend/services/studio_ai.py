@@ -2,7 +2,8 @@
 
 把「需求 → 结构化计划 → 界面结构 → 可运行产物」拆成三个可替换的步骤。
 所有模型调用都在服务端通过 AIHubService 完成，前端不接触模型名与密钥；
-切换模型只需修改 MODEL_PROFILES 中的 id。
+切换档位只需修改 MODEL_PROFILES：每个档位绑定一家供应商与一个已验证免费的模型，
+请求先打该家，降级时换用其它家自己的模型（模型名不跨供应商发送）。
 """
 
 import asyncio
@@ -16,7 +17,14 @@ from core import error_codes
 from core.exceptions import ProviderError
 from schemas.aihub import ChatMessage, GenTxtRequest
 from services import ai_usage
-from services.aihub import AI_MAX_RETRIES, AIHubService, _backoff_seconds, _env_bool, _env_int
+from services.aihub import (
+    AI_MAX_RETRIES,
+    AIHubService,
+    _backoff_seconds,
+    _env_bool,
+    _env_int,
+    providers_for,
+)
 
 #: 各阶段结构化输出失败时使用的错误码：(通用失败, 内容无效)。
 _STAGE_ERROR_CODES: Dict[str, tuple[str, str]] = {
@@ -28,21 +36,34 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_PROFILE = "balanced"
 
+#: 档位 = 供应商 + 该家已实测可用的免费模型（2026-11-04 定案）。
+#: 绑定语义：请求先发 ``provider``，模型名只发给这一家；该家失败后降级到其它家时
+#: 换成那一家自己的模型（见 ``services.aihub.providers_for``），不跨家传模型名。
+#: 三档模型均无付费版本；智谱 429 频发时快速档会先降级到百炼，仍失败才到方舟。
 MODEL_PROFILES: Dict[str, Dict[str, str]] = {
     "balanced": {
         "id": "qwen3.8-flash",
-        "label": "Balanced",
-        "hint": "阿里百炼 Qwen3.8-Flash，主选（失败自动降级到方舟/智谱）",
+        "provider": "aliyun",
+        "provider_label": "阿里百炼",
+        "model_label": "Qwen3.8-Flash",
+        "label": "均衡",
+        "hint": "阿里百炼 Qwen3.8-Flash，默认档（该家失败自动换用其它家自有模型）",
     },
     "fast": {
-        "id": "qwen3.8-flash",
-        "label": "Fast",
-        "hint": "阿里百炼 Qwen3.8-Flash，轻量快速（失败自动降级）",
+        "id": "glm-4.7-flash",
+        "provider": "zhipu",
+        "provider_label": "智谱",
+        "model_label": "GLM-4.7-Flash",
+        "label": "快速",
+        "hint": "智谱 GLM-4.7-Flash，低延迟；智谱限流（429）时自动降级到百炼自有模型",
     },
     "quality": {
-        "id": "qwen3.8-flash",
-        "label": "Quality",
-        "hint": "阿里百炼 Qwen3.8-Flash，长上下文还原（失败自动降级）",
+        "id": "deepseek-v4-1-flash-economy-261017",
+        "provider": "ark",
+        "provider_label": "火山方舟",
+        "model_label": "DeepSeek-V4.1-Flash-Economy",
+        "label": "深度",
+        "hint": "火山方舟 DeepSeek-V4.1-Flash-Economy，长文与复杂页面更稳（失败自动降级）",
     },
 }
 
@@ -108,9 +129,22 @@ def resolve_model(profile: Optional[str] = None) -> str:
     return _profile(profile)["id"]
 
 
+def resolve_provider(profile: Optional[str] = None) -> str:
+    """档位绑定的供应商名（aliyun/ark/zhipu），用于诊断与前端展示。"""
+    return _profile(profile).get("provider", "")
+
+
 def available_models() -> List[Dict[str, str]]:
     return [
-        {"key": key, "model": value["id"], "label": value["label"], "hint": value["hint"]}
+        {
+            "key": key,
+            "model": value["id"],
+            "label": value["label"],
+            "hint": value["hint"],
+            "provider": value.get("provider", ""),
+            "provider_label": value.get("provider_label", ""),
+            "model_label": value.get("model_label", ""),
+        }
         for key, value in MODEL_PROFILES.items()
     ]
 
@@ -152,17 +186,19 @@ async def _gentxt(
     system: str,
     user: str,
     *,
-    model: str,
+    profile: Optional[str] = None,
     max_completion_tokens: int,
     temperature: float = 0.6,
 ) -> str:
-    service = AIHubService()
+    spec = _profile(profile)
+    # 档位绑定的供应商排最前；降级家各自使用自己的模型，模型名不跨家发送。
+    service = AIHubService(providers=providers_for(spec.get("provider") or None, spec.get("id")))
     request = GenTxtRequest(
         messages=[
             ChatMessage(role="system", content=system),
             ChatMessage(role="user", content=user),
         ],
-        model=model,
+        model=spec["id"],
         max_completion_tokens=max_completion_tokens,
         temperature=temperature,
     )
@@ -188,14 +224,14 @@ async def _gentxt_json(
     user: str,
     *,
     stage: str,
-    model: str,
+    profile: Optional[str] = None,
     max_completion_tokens: int,
     required: List[str],
     temperature: float = 0.6,
 ) -> Dict[str, Any]:
     failure_code, invalid_code = _STAGE_ERROR_CODES[stage]
     raw = await _gentxt(
-        system, user, model=model, max_completion_tokens=max_completion_tokens, temperature=temperature
+        system, user, profile=profile, max_completion_tokens=max_completion_tokens, temperature=temperature
     )
     payload_text = _extract_json_block(raw)
     if not payload_text.strip():
@@ -213,7 +249,7 @@ async def _gentxt_json(
         repaired = await _gentxt(
             "你只输出合法 JSON，字段齐全，不要解释。修复下面这段内容，返回合法 JSON。",
             payload_text,
-            model=model,
+            profile=profile,
             max_completion_tokens=max_completion_tokens,
             temperature=0,
         )
@@ -294,7 +330,6 @@ async def generate_plan(
     context: str = "",
     profile: Optional[str] = None,
 ) -> Dict[str, Any]:
-    model = resolve_model(profile)
     user = f"""把下面这条需求拆解成可执行的单文件原型开发计划。
 
 项目名：{project_name}
@@ -309,7 +344,7 @@ async def generate_plan(
 
 要求：steps 为 3-5 个，必须是实现该需求真正需要的步骤，不要写“需求分析”这种空话。"""
     payload = await _gentxt_json(
-        PROMPT_SYSTEM, user, stage="plan", model=model,
+        PROMPT_SYSTEM, user, stage="plan", profile=profile,
         max_completion_tokens=_stage_request_tokens("plan"), required=["summary", "steps"],
     )
     return _normalize_plan(payload)
@@ -321,7 +356,6 @@ async def generate_outline(
     *,
     profile: Optional[str] = None,
 ) -> Dict[str, Any]:
-    model = resolve_model(profile)
     user = f"""根据需求和计划，设计这个原型的界面结构与示例数据。
 
 需求：{requirement}
@@ -336,7 +370,7 @@ async def generate_outline(
 
 要求：sections 为 3-5 个；内容要具体，能直接写成界面，不要抽象占位。"""
     payload = await _gentxt_json(
-        PROMPT_SYSTEM, user, stage="outline", model=model,
+        PROMPT_SYSTEM, user, stage="outline", profile=profile,
         max_completion_tokens=_stage_request_tokens("outline"), required=["title", "sections"],
     )
     return _normalize_outline(payload)
@@ -350,7 +384,6 @@ async def generate_artifact(
     profile: Optional[str] = None,
     context: Optional[str] = None,
 ) -> str:
-    model = resolve_model(profile)
     context_block = ""
     if context:
         context_block = (
@@ -369,7 +402,7 @@ async def generate_artifact(
 界面语言与需求语言保持一致。现在直接输出 HTML。"""
 
     raw = await _gentxt(
-        ARTIFACT_SYSTEM, user, model=model,
+        ARTIFACT_SYSTEM, user, profile=profile,
         max_completion_tokens=_stage_request_tokens("artifact"), temperature=0.7,
     )
     try:
@@ -379,7 +412,7 @@ async def generate_artifact(
             ARTIFACT_SYSTEM,
             "上一次输出不是完整 HTML。请重新输出完整文档，从 <!DOCTYPE html> 开始、到 </html> 结束，只输出 HTML。\n\n需求："
             + requirement,
-            model=model,
+            profile=profile,
             max_completion_tokens=_stage_request_tokens("artifact"),
             temperature=0.4,
         )
