@@ -158,8 +158,10 @@ export default function StudioPage() {
           built = await studioApi.artifact(projectId, { requirement: req, plan_summary: planToText(plan), outline, profile: selectedProfile }, buildId);
         }
         updateSummary(built.project);
-        setArtifactHtml(built.artifact_html); setPreviewUrl(built.preview_url ?? null); setActiveVersion(built.version.version_no);
+        setArtifactHtml(built.artifact_html); setActiveVersion(built.version.version_no);
         applyDetail(await studioApi.getProject(projectId));
+        // applyDetail 会按“刚打开项目”的语义清空预览地址，构建成功后必须再写回。
+        setPreviewUrl(built.preview_url ?? null);
         setMobileTab('preview');
       } finally { setBuilding(false); setRunningPlan(null); setStageLabel(''); }
     });
@@ -220,8 +222,10 @@ export default function StudioPage() {
           }, buildId);
         }
         updateSummary(built.project);
-        setArtifactHtml(built.artifact_html); setPreviewUrl(built.preview_url ?? null); setActiveVersion(built.version.version_no);
+        setArtifactHtml(built.artifact_html); setActiveVersion(built.version.version_no);
         applyDetail(await studioApi.getProject(projectId));
+        // 同上：详情刷新不得覆盖本次构建刚取得的沙箱预览地址。
+        setPreviewUrl(built.preview_url ?? null);
         setRevision('');
         setMobileTab('preview');
       } finally { setBuilding(false); setStageLabel(''); }
@@ -240,10 +244,10 @@ export default function StudioPage() {
         const built = await studioApi.editArtifact(projectId, { html, note }, buildId);
         updateSummary(built.project);
         setArtifactHtml(built.artifact_html);
-        setPreviewUrl(built.preview_url ?? null);
         setActiveVersion(built.version.version_no);
         setEditing(false);
         applyDetail(await studioApi.getProject(projectId));
+        setPreviewUrl(built.preview_url ?? null);
         setMobileTab('preview');
       } finally { setBuilding(false); setStageLabel(''); }
     });

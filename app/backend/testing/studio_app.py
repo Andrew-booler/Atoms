@@ -151,6 +151,9 @@ register_exception_handlers(app)
 @app.post('/__test/reset')
 async def reset():
     state.update(stage="", mode="", remaining=0)
+    # 每例开始时回收沙箱容器：数据库执行记录会被 TRUNCATE，若容器不同步清理，
+    # 总量上限（SANDBOX_MAX_CONTAINERS）会持续累计并在第 5 个预览起拒绝启动。
+    ExecutionService.cleanup_orphan_containers()
     async with engine.begin() as connection:
         await connection.execute(text(f'TRUNCATE "{SCHEMA}".studio_messages, "{SCHEMA}".studio_versions, "{SCHEMA}".projects, "{SCHEMA}".executions, "{SCHEMA}".build_events, "{SCHEMA}".user_ai_configs, "{SCHEMA}".ai_usage_records RESTART IDENTITY'))
     return {"schema": SCHEMA, "reset": True}

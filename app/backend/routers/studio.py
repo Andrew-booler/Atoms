@@ -702,7 +702,9 @@ async def _try_run_preview(
         details = service.last_run_details or {}
         return execution.preview_url, details
     except SandboxUnavailableError as exc:
-        logger.warning("沙箱不可用，artifact 已保存但预览未启动：%s", exc.code)
+        logger.warning(
+            "沙箱不可用，artifact 已保存但预览未启动：%s details=%s", exc.code, exc.details
+        )
         return None, {"reason": exc.message}
     except Exception as exc:  # noqa: BLE001
         logger.warning("启动沙箱预览失败：%s", exc, exc_info=True)

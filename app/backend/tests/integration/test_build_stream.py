@@ -129,6 +129,9 @@ async def test_build_events_are_persisted_in_order(client):
     log = events[8]["data"]
     assert set(log) >= {"preview_ready", "stdout", "stderr", "files", "port", "preview_url", "reason"}
     assert isinstance(log["files"], list)
+    # 预览必须真的启动沙箱并从 preview_url 提供，而不是降级为 srcDoc 本地预览。
+    assert log["preview_ready"] is True
+    assert log["preview_url"].startswith("http://127.0.0.1:")
     assert events[9]["type"] == "done"
 
     # 事件里只允许文件元信息，绝不出现页面正文。
