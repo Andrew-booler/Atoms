@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { BuildEvent } from '../src/lib/build-stream';
 import { BuildTerminal } from '../src/components/studio/BuildTerminal';
 import { useBuildTerminal } from '../src/hooks/useBuildTerminal';
-import { parseSSEFrame, parseSSEText, streamBuildEvents } from '../src/lib/build-stream';
+import { parseSSEFrame, parseSSEText, STREAM_INTERRUPTED_MESSAGE, streamBuildEvents } from '../src/lib/build-stream';
 
 vi.mock('../src/lib/build-stream', async importOriginal => {
   const actual = await importOriginal<typeof import('../src/lib/build-stream')>();
@@ -91,6 +91,15 @@ describe('BuildTerminal', () => {
     expect(line.className).toContain('text-red-400');
     expect(screen.getByText('构建失败')).toBeInTheDocument();
   });
+
+  it('连接中断时构建终端显示中文提示并标记失败', async () => {
+    render(<BuildTerminal events={[]} running={false} error={STREAM_INTERRUPTED_MESSAGE} />);
+
+    expect(screen.getByText('构建失败')).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: /构建终端/ }));
+    expect(screen.getByText(new RegExp(STREAM_INTERRUPTED_MESSAGE))).toBeInTheDocument();
+    expect(screen.queryByText(/Network Error/)).not.toBeInTheDocument();
+  });
 });
 
 describe('SSE 解析', () => {
@@ -153,6 +162,45 @@ describe('streamBuildEvents（fetch 事件流）', () => {
       message: '请先登录后再操作。',
     });
   });
+
+  it('SSE 提前关闭（未收到 done）提示中文连接中断，而非 Network Error', async () => {
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(
+          new TextEncoder().encode(
+            'event: stage_started\ndata: {"seq":1,"type":"stage_started","stage":"plan","message":"开始","data":{}}\n\n'
+          )
+        );
+        controller.close();
+      },
+    });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response(body, { status: 200, headers: { 'Content-Type': 'text/event-stream' } }))
+    );
+
+    const stream = await realStreamBuildEvents();
+    const error = (await stream(1, 'b1', { onEvent: vi.fn() }).catch(item => item)) as Error;
+
+    expect(error).toBeInstanceOf(Error);
+    expect(error.message).toBe(STREAM_INTERRUPTED_MESSAGE);
+    expect(error.message).not.toContain('Network Error');
+  });
+
+  it('fetch 抛 TypeError（Network Error）时转为中文连接中断提示', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        throw new TypeError('Network Error');
+      })
+    );
+
+    const stream = await realStreamBuildEvents();
+    const error = (await stream(1, 'b1', { onEvent: vi.fn() }).catch(item => item)) as Error;
+
+    expect(error.message).toBe(STREAM_INTERRUPTED_MESSAGE);
+    expect(error.message).not.toContain('Network Error');
+  });
 });
 
 describe('useBuildTerminal', () => {
@@ -196,6 +244,17 @@ describe('useBuildTerminal', () => {
     act(() => result.current.watch(1, 'build-2'));
 
     await waitFor(() => expect(result.current.error).toBe('生成的页面内容无效，请重新生成。'));
+    expect(result.current.running).toBe(false);
+  });
+
+  it('连接层失败（network error）显示中文兜底提示并标记失败', async () => {
+    vi.mocked(streamBuildEvents).mockRejectedValue(new TypeError('Network Error'));
+
+    const { result } = renderHook(() => useBuildTerminal());
+    act(() => result.current.watch(1, 'build-network'));
+
+    await waitFor(() => expect(result.current.error).toBe(STREAM_INTERRUPTED_MESSAGE));
+    expect(result.current.error).not.toContain('Network Error');
     expect(result.current.running).toBe(false);
   });
 

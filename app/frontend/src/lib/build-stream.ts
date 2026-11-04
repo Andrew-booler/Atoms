@@ -32,6 +32,20 @@ export class BuildStreamError extends Error {
   }
 }
 
+/** 连接层失败（fetch 抛错、流提前关闭、未收到 done）的兜底中文提示。 */
+export const STREAM_INTERRUPTED_MESSAGE = '连接中断，服务可能已重启，请重试。';
+
+/**
+ * 把 SSE 消费过程中的异常转成可展示文案。
+ *
+ * HTTP 4xx/5xx 已在 ``streamBuildEvents`` 内转成带后端 message 的
+ * ``BuildStreamError``；连接层失败（TypeError、提前关流）统一用兜底文案，
+ * 避免把浏览器原始的 ``Network Error`` 直接抛给用户。
+ */
+export function describeStreamError(error: unknown): string {
+  return error instanceof BuildStreamError ? error.message : STREAM_INTERRUPTED_MESSAGE;
+}
+
 /** 解析一个 SSE 帧；只取 data 行的 JSON，注释心跳返回 null。 */
 export function parseSSEFrame(frame: string): BuildEvent | null {
   const dataLines: string[] = [];
@@ -67,7 +81,8 @@ interface StreamOptions {
  *
  * 浏览器原生 EventSource 不能带自定义头，因此这里用 fetch + ReadableStream 解析；
  * 后端同时接受 Authorization 头与 ?access_token= 查询参数（文档见 roadmap Phase 10）。
- * 收到 done/error 或流结束时 resolve；HTTP 非 2xx 抛 BuildStreamError。
+ * 收到 done/error 或流结束时 resolve；HTTP 非 2xx 抛 BuildStreamError；
+ * 连接层失败（fetch 抛错、流提前关闭、未收到终止事件）统一抛中文兜底文案。
  */
 export async function streamBuildEvents(
   projectId: number,
@@ -75,17 +90,24 @@ export async function streamBuildEvents(
   { signal, onEvent }: StreamOptions
 ): Promise<void> {
   const token = getStoredToken();
-  const response = await fetch(
-    `${getAPIBaseURL()}/api/v1/studio/projects/${projectId}/builds/${encodeURIComponent(buildId)}/stream`,
-    {
-      method: 'GET',
-      headers: {
-        Accept: 'text/event-stream',
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      },
-      signal,
-    }
-  );
+  let response: Response;
+  try {
+    response = await fetch(
+      `${getAPIBaseURL()}/api/v1/studio/projects/${projectId}/builds/${encodeURIComponent(buildId)}/stream`,
+      {
+        method: 'GET',
+        headers: {
+          Accept: 'text/event-stream',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        signal,
+      }
+    );
+  } catch (error) {
+    // 主动取消交给调用方忽略；其余（TypeError / Network Error）统一转中文提示。
+    if (signal?.aborted) throw error;
+    throw new BuildStreamError(STREAM_INTERRUPTED_MESSAGE);
+  }
 
   if (!response.ok) {
     let message = `构建事件流连接失败（${response.status}）`;
@@ -104,27 +126,39 @@ export async function streamBuildEvents(
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let buffer = '';
+  let completed = false;
 
   const consume = (frames: string[]): boolean => {
     for (const frame of frames) {
       const event = parseSSEFrame(frame);
       if (!event) continue;
       onEvent(event);
-      if (event.type === 'done' || event.type === 'error') return true;
+      if (event.type === 'done' || event.type === 'error') {
+        completed = true;
+        return true;
+      }
     }
     return false;
   };
 
   try {
     while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
+      let chunk: ReadableStreamReadResult<Uint8Array>;
+      try {
+        chunk = await reader.read();
+      } catch (error) {
+        if (signal?.aborted) throw error;
+        throw new BuildStreamError(STREAM_INTERRUPTED_MESSAGE);
+      }
+      if (chunk.done) break;
+      buffer += decoder.decode(chunk.value, { stream: true });
       const frames = buffer.split('\n\n');
       buffer = frames.pop() ?? '';
       if (consume(frames)) return;
     }
     if (buffer.trim()) consume([buffer]);
+    // 流自然结束但没收到 done/error：视为连接被提前切断（如服务重启）。
+    if (!completed) throw new BuildStreamError(STREAM_INTERRUPTED_MESSAGE);
   } finally {
     reader.releaseLock();
   }

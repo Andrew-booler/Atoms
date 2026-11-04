@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { streamBuildEvents, type BuildEvent } from '@/lib/build-stream';
-import { describeError, studioApi } from '@/lib/studio';
+import { describeStreamError, streamBuildEvents, type BuildEvent } from '@/lib/build-stream';
+import { studioApi } from '@/lib/studio';
 
 export interface BuildTerminal {
   events: BuildEvent[];
@@ -52,7 +52,8 @@ export function useBuildTerminal(): BuildTerminal {
         .catch(failure => {
           if (controller.signal.aborted) return;
           setRunning(false);
-          setError(describeError(failure));
+          // HTTP 错误展示后端 message；连接层失败统一中文兜底，不抛出 Network Error。
+          setError(describeStreamError(failure));
         })
         .finally(() => {
           if (!controller.signal.aborted) setRunning(false);

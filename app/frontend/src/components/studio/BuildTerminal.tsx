@@ -139,9 +139,14 @@ export function BuildTerminal({ events, running, error, defaultOpen = false }: B
           className="studio-scroll max-h-56 overflow-y-auto border-t border-line bg-[#1F1D1A] px-3 py-2"
         >
           {events.length === 0 ? (
-            <p className="mono text-[11px] leading-5 text-[#A9A196]">尚无构建事件。提交需求后这里会实时显示进度。</p>
+            <p className="mono text-[11px] leading-5 text-[#A9A196]">
+              {error ? `✕ ${error}` : '尚无构建事件。提交需求后这里会实时显示进度。'}
+            </p>
           ) : (
             <div className="mono space-y-1 text-[11px] leading-5 text-[#E8E2D9]">
+              {error && !events.some(event => event.type === 'error') && (
+                <p className="text-red-400">✕ {error}</p>
+              )}
               {events.map(event => (
                 <EventRow key={event.seq} event={event} />
               ))}
