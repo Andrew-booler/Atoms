@@ -10,7 +10,9 @@
     不触碰 volume、network、image，也不触碰任何非本项目容器。
 
 .NOTES
-    由 Windows 计划任务 AtomsSandboxReaper 每 10 分钟触发一次。
+    手动回收器：每次跑完涉及沙箱的测试或演示后执行一次
+    `powershell -File scripts/docker-sandbox-reaper.ps1 -MaxAgeMinutes 0`，
+    不依赖定时任务；若未来重建计划任务 AtomsSandboxReaper，需用户明确授权。
 #>
 param(
     [int]$MaxAgeMinutes = 30
